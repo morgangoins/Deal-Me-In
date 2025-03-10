@@ -10,7 +10,9 @@ const io = new Server(server, {
         methods: ["GET", "POST"],
         credentials: true
     },
-    transports: ['websocket'] // Force WebSocket for now
+    transports: ['websocket'], // Force WebSocket
+    pingTimeout: 60000, // Increase timeout to 60s
+    pingInterval: 25000 // Ping every 25s
 });
 
 app.use(express.static('public'));
@@ -122,6 +124,7 @@ function startNewHand() {
 
 // Convert gameState for client (serialize Sets to arrays)
 function prepareGameStateForClient() {
+    console.log('Sending game state to client:', { ...gameState, hasBetThisRound: Array.from(gameState.hasBetThisRound) });
     return {
         ...gameState,
         hasBetThisRound: Array.from(gameState.hasBetThisRound)
@@ -129,7 +132,7 @@ function prepareGameStateForClient() {
 }
 
 io.on('connection', (socket) => {
-    console.log(`New connection: ${socket.id}`);
+    console.log(`New connection from ${socket.id}`);
     gameState.spectators++;
     io.emit('update', prepareGameStateForClient());
 
@@ -190,6 +193,7 @@ io.on('connection', (socket) => {
     socket.on('advance', () => {
         if (gameState.hasBetThisRound.size === gameState.players.length) {
             advanceStage();
+            io.emit('update', prepareGameStateForClient());
         }
     });
 
