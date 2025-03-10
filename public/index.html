@@ -33,7 +33,7 @@
         <button onclick="configureGame()">Start Game</button>
     </div>
     <svg id="pokerSvg" viewBox="0 0 800 600" style="display: none;"></svg>
-    <div id="controls" style="display: none;">
+    <div id="controls">
         <button id="sitDownBtn" onclick="sitDown()" style="display:none">Sit Down</button>
         <button id="betBtn" onclick="toggleBetOptions()" disabled>Bet</button>
         <button id="checkBtn" onclick="check()" disabled>Check</button>
@@ -79,6 +79,7 @@
 
         const elements = {
             svg: document.getElementById('pokerSvg'),
+            controls: document.getElementById('controls'),
             sitDownBtn: document.getElementById('sitDownBtn'),
             betBtn: document.getElementById('betBtn'),
             checkBtn: document.getElementById('checkBtn'),
@@ -100,7 +101,7 @@
         let isSpectating = true;
         let localStream = null;
         let peerConnections = {};
-        const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+        const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] }; // Added fallback STUN server
 
         function handleError(type, error) {
             const timestamp = new Date().toISOString();
@@ -143,6 +144,7 @@
                         audio.srcObject = event.streams[0];
                         audio.autoplay = true;
                         audio.volume = 0.5;
+                        document.body.appendChild(audio); // Ensure audio element is added to DOM
                     };
                     if (localStream) peerConnections[from].addTrack(localStream.getAudioTracks()[0], localStream);
                 }
@@ -155,7 +157,7 @@
                 } else if (signal.type === 'answer') {
                     await pc.setRemoteDescription(new RTCSessionDescription(signal));
                 } else if (signal.candidate) {
-                    await pc.addIceCandidate(new RTCIceCandidate(signal));
+                    await pc.addIceCandidate(new RTCIceCandidate(signal)).catch(e => console.error('ICE Candidate error:', e));
                 }
             },
             configError: (message) => handleError('Config', new Error(message)),
@@ -165,7 +167,7 @@
         Object.entries(socketEvents).forEach(([event, handler]) => socket.on(event, handler));
 
         function toggleGameDisplay(isConfigured) {
-            document.getElementById('configScreen').style.display = isConfigured ? 'none' : 'block';
+            elements.configScreen.style.display = isConfigured ? 'none' : 'block';
             elements.svg.style.display = isConfigured ? 'block' : 'none';
             elements.controls.style.display = isConfigured ? 'block' : 'none';
         }
@@ -455,6 +457,7 @@
                         audio.srcObject = event.streams[0];
                         audio.autoplay = true;
                         audio.volume = 0.5;
+                        document.body.appendChild(audio); // Ensure audio element is in DOM
                     };
                     pc.addTrack(audioTrack, localStream);
                     const offer = await pc.createOffer();
@@ -462,8 +465,11 @@
                     socket.emit('voiceSignal', { to: null, signal: offer });
                     peerConnections[myPlayerId] = pc;
                     
-                    Object.values(peerConnections).forEach(pc => {
-                        if (pc !== peerConnections[myPlayerId]) pc.addTrack(audioTrack, localStream);
+                    // Add track to existing connections
+                    Object.values(peerConnections).forEach(existingPc => {
+                        if (existingPc !== pc && existingPc.signalingState !== 'closed') {
+                            existingPc.addTrack(audioTrack, localStream);
+                        }
                     });
                 } else {
                     localStream.getTracks().forEach(track => track.stop());
