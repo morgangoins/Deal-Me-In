@@ -53,11 +53,13 @@
 
     <script>
         try {
+            console.log('Attempting to connect to server...');
             const socket = io('http://localhost:3000', {
-                transports: ['websocket'], // Force WebSocket only for now
+                transports: ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 10,
-                reconnectionDelay: 1000
+                reconnectionDelay: 1000,
+                timeout: 10000
             });
             const svg = document.getElementById('pokerSvg');
             const sitDownBtn = document.getElementById('sitDownBtn');
@@ -82,16 +84,17 @@
             const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
             socket.on('connect', () => {
-                console.log('Connected to server with ID:', socket.id);
+                console.log('Successfully connected to server with ID:', socket.id);
                 errorMessage.textContent = 'Connected!';
-                setTimeout(() => errorMessage.textContent = '', 2000); // Clear after 2s
+                setTimeout(() => errorMessage.textContent = '', 2000);
                 drawScene();
             });
 
             socket.on('update', (state) => {
                 try {
+                    console.log('Received update from server:', state);
                     gameState = state;
-                    gameState.hasBetThisRound = new Set(state.hasBetThisRound);
+                    gameState.hasBetThisRound = new Set(state.hasBetThisRound || []);
                     myPlayerId = socket.id;
                     document.getElementById('spectatorNum').textContent = gameState.spectators || 0;
                     drawScene();
@@ -103,7 +106,7 @@
 
             socket.on('connect_error', (error) => {
                 errorMessage.textContent = 'WebSocket connection error: ' + error.message;
-                console.error('Socket.IO connection error:', error);
+                console.error('Socket.IO connect_error:', error);
             });
 
             socket.on('reconnect_attempt', (attempt) => {
@@ -373,14 +376,19 @@
                 gameState.pastHands.forEach((hand, index) => {
                     const entry = document.createElement('div');
                     entry.className = 'hand-entry';
+                    const preflopBets = hand.bets.preflop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
+                    const flopBets = hand.bets.flop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
+                    const turnBets = hand.bets.turn.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
+                    const riverBets = hand.bets.river.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
+                    const playersInfo = hand.players.map(p => `${p.name} (${p.cards.join(', ')}, ${p.chips} chips)`).join('; ');
                     entry.innerHTML = `
                         <strong>Hand ${index + 1} (Winner: ${hand.winner}, Pot: ${hand.pot})</strong><br>
                         Community: ${hand.communityCards.join(', ')}<br>
-                        Preflop: ${hand.bets.preflop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                        Flop: ${hand.bets.flop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                        Turn: ${hand.bets.turn.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                        River: ${hand.bets.river.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                        Players: ${hand.players.map(p => `${p.name} (${p.cards.join(', ')}, ${p.chips} chips)`).join('; ')}
+                        Preflop: ${preflopBets}<br>
+                        Flop: ${flopBets}<br>
+                        Turn: ${turnBets}<br>
+                        River: ${riverBets}<br>
+                        Players: ${playersInfo}
                     `;
                     pastHandsMenu.appendChild(entry);
                 });

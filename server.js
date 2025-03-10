@@ -10,7 +10,7 @@ const io = new Server(server, {
         methods: ["GET", "POST"],
         credentials: true
     },
-    transports: ['websocket'] // Force WebSocket only for now
+    transports: ['websocket'] // Force WebSocket for now
 });
 
 app.use(express.static('public'));
@@ -117,13 +117,21 @@ function startNewHand() {
     gameState.hasBetThisRound.add(gameState.players[bigBlindIndex].id);
     
     dealCards();
-    io.emit('update', gameState);
+    io.emit('update', prepareGameStateForClient());
+}
+
+// Convert gameState for client (serialize Sets to arrays)
+function prepareGameStateForClient() {
+    return {
+        ...gameState,
+        hasBetThisRound: Array.from(gameState.hasBetThisRound)
+    };
 }
 
 io.on('connection', (socket) => {
     console.log(`New connection: ${socket.id}`);
     gameState.spectators++;
-    io.emit('update', gameState);
+    io.emit('update', prepareGameStateForClient());
 
     socket.on('sitDown', ({ name, chips, seat }) => {
         console.log(`Sit down attempt: ${name} at seat ${seat}`);
@@ -134,8 +142,9 @@ io.on('connection', (socket) => {
             gameState.spectators--;
             if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
                 startNewHand();
+            } else {
+                io.emit('update', prepareGameStateForClient());
             }
-            io.emit('update', gameState);
         }
     });
 
@@ -151,7 +160,7 @@ io.on('connection', (socket) => {
         gameState.currentHandBets[gameState.gameStage].push({ player: player.name, amount });
         
         gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-        io.emit('update', gameState);
+        io.emit('update', prepareGameStateForClient());
     });
 
     socket.on('check', () => {
@@ -160,7 +169,7 @@ io.on('connection', (socket) => {
         
         gameState.hasBetThisRound.add(player.id);
         gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-        io.emit('update', gameState);
+        io.emit('update', prepareGameStateForClient());
     });
 
     socket.on('fold', () => {
@@ -175,13 +184,12 @@ io.on('connection', (socket) => {
             determineWinner();
             gameState.gameStage = 'showdown';
         }
-        io.emit('update', gameState);
+        io.emit('update', prepareGameStateForClient());
     });
 
     socket.on('advance', () => {
         if (gameState.hasBetThisRound.size === gameState.players.length) {
             advanceStage();
-            io.emit('update', gameState);
         }
     });
 
@@ -202,7 +210,7 @@ io.on('connection', (socket) => {
         } else {
             gameState.spectators--;
         }
-        io.emit('update', gameState);
+        io.emit('update', prepareGameStateForClient());
     });
 
     socket.on('error', (error) => {
