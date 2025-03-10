@@ -1,9 +1,53 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- Previous head content remains the same, adding some new styles -->
+    <meta charset="UTF-8">
+    <title>Online Poker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
     <style>
-        /* Previous styles remain, adding new ones */
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: 'Montserrat', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f0f2f5;
+            min-height: 100vh;
+        }
+        #pokerSvg {
+            width: 800px;
+            height: 600px;
+        }
+        #controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            position: relative;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            background: #1a73e8;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.1s;
+        }
+        button:hover {
+            background: #1557b0;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
         #betPopup {
             position: absolute;
             top: -100px;
@@ -15,6 +59,48 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
             display: none;
             z-index: 20;
+        }
+        #betPopup button {
+            padding: 8px 15px;
+            font-size: 14px;
+        }
+        #customBet {
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            width: 80px;
+        }
+        .chip-box {
+            padding: 5px 10px;
+            background: #fff;
+            border: 1px solid #333;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            font-size: 14px;
+        }
+        #pastHandsBtn {
+            position: absolute;
+            bottom: -60px;
+            left: 0;
+        }
+        #pastHandsMenu {
+            display: none;
+            position: absolute;
+            bottom: -50px;
+            left: 120px;
+            width: 300px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 10px;
+            z-index: 10;
+        }
+        .hand-entry {
+            margin-bottom: 10px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
         }
         .open-seat {
             opacity: 0.6;
@@ -28,14 +114,23 @@
             align-items: center;
             gap: 5px;
         }
+        #errorMessage {
+            color: red;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+        }
     </style>
 </head>
 <body>
-    <!-- Previous HTML structure with slight modifications -->
+    <div id="errorMessage"></div>
     <svg id="pokerSvg" viewBox="0 0 800 600"></svg>
     <div id="controls">
         <button id="sitDownBtn" onclick="sitDown()" style="display:none">Sit Down</button>
-        <!-- Other buttons remain the same -->
+        <button id="betBtn" onclick="toggleBetOptions()" disabled>Bet</button>
+        <button id="checkBtn" onclick="check()" disabled>Check</button>
+        <button id="foldBtn" onclick="fold()" disabled>Fold</button>
+        <button id="nextBtn" onclick="advanceGame()" disabled>Next</button>
         <div id="betPopup">
             <button onclick="bet(10)">10</button>
             <button onclick="bet(Math.floor(gameState.pot / 4))">1/4 Pot</button>
@@ -45,7 +140,8 @@
             <input id="customBet" type="number" min="1" placeholder="Custom">
             <button onclick="betCustom()">Go</button>
         </div>
-        <!-- Rest of controls remain -->
+        <button id="pastHandsBtn" onclick="togglePastHands()">Past Hands</button>
+        <div id="pastHandsMenu"></div>
     </div>
     <div id="spectatorCount">
         <svg width="20" height="20" viewBox="0 0 20 20">
@@ -55,142 +151,333 @@
     </div>
 
     <script>
-        const socket = io();
-        // Previous variable declarations remain
-        const betPopup = document.getElementById('betPopup');
+        try {
+            const socket = io('http://localhost:3000'); // Explicit server URL
+            const svg = document.getElementById('pokerSvg');
+            const sitDownBtn = document.getElementById('sitDownBtn');
+            const betBtn = document.getElementById('betBtn');
+            const checkBtn = document.getElementById('checkBtn');
+            const foldBtn = document.getElementById('foldBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            const betPopup = document.getElementById('betPopup');
+            const pastHandsMenu = document.getElementById('pastHandsMenu');
+            const errorMessage = document.getElementById('errorMessage');
 
-        let gameState = {
-            players: [],
-            communityCards: [],
-            gameStage: 'waiting',
-            pot: 0,
-            currentPlayerIndex: 0,
-            dealerIndex: 0,
-            hasBetThisRound: new Set(),
-            pastHands: [],
-            currentHandBets: { preflop: [], flop: [], turn: [], river: [] },
-            spectators: 0,
-            smallBlind: 5,
-            bigBlind: 10
-        };
-        let myPlayerId = null;
-        let isSpectating = true;
+            let gameState = {
+                players: [],
+                communityCards: [],
+                gameStage: 'waiting',
+                pot: 0,
+                currentPlayerIndex: 0,
+                dealerIndex: 0,
+                hasBetThisRound: new Set(),
+                pastHands: [],
+                currentHandBets: { preflop: [], flop: [], turn: [], river: [] },
+                spectators: 0,
+                smallBlind: 5,
+                bigBlind: 10
+            };
+            let myPlayerId = null;
+            let isSpectating = true;
 
-        socket.on('update', (state) => {
-            gameState = state;
-            gameState.hasBetThisRound = new Set(state.hasBetThisRound);
-            myPlayerId = socket.id;
-            document.getElementById('spectatorNum').textContent = gameState.spectators;
-            drawScene();
-        });
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                drawScene(); // Initial draw on connect
+            });
 
-        function drawScene() {
-            svg.innerHTML = '';
-            // Previous defs and table drawing remains
-
-            // Draw 8 seats
-            for (let i = 0; i < 8; i++) {
-                const angle = (i / 8) * 2 * Math.PI;
-                const x = 400 + 250 * Math.cos(angle);
-                const y = 300 + 150 * Math.sin(angle);
-                
-                const player = gameState.players[i];
-                if (!player) {
-                    const seat = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                    seat.setAttribute('cx', x);
-                    seat.setAttribute('cy', y);
-                    seat.setAttribute('r', '30');
-                    seat.setAttribute('fill', '#ccc');
-                    seat.setAttribute('class', 'open-seat');
-                    seat.onclick = () => sitDownAtSeat(i);
-                    svg.appendChild(seat);
-                    
-                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    text.setAttribute('x', x);
-                    text.setAttribute('y', y + 5);
-                    text.setAttribute('text-anchor', 'middle');
-                    text.textContent = 'Open';
-                    svg.appendChild(text);
-                    continue;
+            socket.on('update', (state) => {
+                try {
+                    gameState = state;
+                    gameState.hasBetThisRound = new Set(state.hasBetThisRound);
+                    myPlayerId = socket.id;
+                    document.getElementById('spectatorNum').textContent = gameState.spectators || 0;
+                    drawScene();
+                } catch (e) {
+                    errorMessage.textContent = 'Update error: ' + e.message;
+                    console.error('Update error:', e);
                 }
+            });
 
-                // Draw player info (modified for blinds)
-                if (i === gameState.dealerIndex) {
-                    // Dealer indicator remains
-                }
+            socket.on('connect_error', (error) => {
+                errorMessage.textContent = 'Connection error: ' + error.message;
+                console.error('Socket.IO connection error:', error);
+            });
 
-                if (player.cards) {
-                    const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
-                    const isWinner = gameState.gameStage === 'showdown' && i === gameState.currentPlayerIndex;
-                    const yOffset = i === 0 ? 270 : y - 25; // Align Player 1 with community cards
-                    drawCard(showCards ? player.cards[0] : '?', x - 45, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
-                    drawCard(showCards ? player.cards[1] : '?', x + 15, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
-                }
+            function drawScene() {
+                try {
+                    console.log('Drawing scene');
+                    svg.innerHTML = '';
 
-                // Add blind indicators
-                const blindText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                blindText.setAttribute('x', x);
-                blindText.setAttribute('y', y + 100);
-                blindText.setAttribute('text-anchor', 'middle');
-                blindText.setAttribute('font-size', '12');
-                if (i === (gameState.dealerIndex + 1) % gameState.players.length) {
-                    blindText.textContent = 'SB';
-                } else if (i === (gameState.dealerIndex + 2) % gameState.players.length) {
-                    blindText.textContent = 'BB';
+                    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                    const dimFilter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+                    dimFilter.setAttribute('id', 'dim');
+                    dimFilter.innerHTML = '<feColorMatrix type="matrix" values="0.5 0 0 0 0  0 0.5 0 0 0  0 0 0.5 0 0  0 0 0 0.5 0"/>';
+                    defs.appendChild(dimFilter);
+
+                    const glowFilter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+                    glowFilter.setAttribute('id', 'glow');
+                    glowFilter.innerHTML = `
+                        <feGaussianBlur stdDeviation="2.5" result="blur"/>
+                        <feMerge>
+                            <feMergeNode in="blur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    `;
+                    defs.appendChild(glowFilter);
+                    svg.appendChild(defs);
+
+                    const table = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+                    table.setAttribute('cx', '400');
+                    table.setAttribute('cy', '300');
+                    table.setAttribute('rx', '300');
+                    table.setAttribute('ry', '200');
+                    table.setAttribute('fill', 'url(#tableGradient)');
+                    if (gameState.gameStage === 'showdown') table.setAttribute('filter', 'url(#dim)');
+                    svg.appendChild(table);
+
+                    const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'radialGradient');
+                    gradient.setAttribute('id', 'tableGradient');
+                    gradient.innerHTML = `
+                        <stop offset="0%" style="stop-color: #2e7d32;" />
+                        <stop offset="100%" style="stop-color: #1b5e20;" />
+                    `;
+                    defs.appendChild(gradient);
+
+                    const cardWidth = 60;
+                    const cardSpacing = 10;
+                    const totalWidth = gameState.communityCards.length * cardWidth + (gameState.communityCards.length - 1) * cardSpacing;
+                    const startX = 400 - totalWidth / 2;
+                    gameState.communityCards.forEach((card, i) => {
+                        drawCard(card, startX + i * (cardWidth + cardSpacing), 270, gameState.gameStage === 'showdown');
+                    });
+
+                    for (let i = 0; i < 8; i++) {
+                        const angle = (i / 8) * 2 * Math.PI;
+                        const x = 400 + 250 * Math.cos(angle);
+                        const y = 300 + 150 * Math.sin(angle);
+                        const player = gameState.players.find(p => p && p.seat === i);
+
+                        if (!player) {
+                            const seat = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                            seat.setAttribute('cx', x);
+                            seat.setAttribute('cy', y);
+                            seat.setAttribute('r', '30');
+                            seat.setAttribute('fill', '#ccc');
+                            seat.setAttribute('class', 'open-seat');
+                            seat.onclick = () => sitDownAtSeat(i);
+                            svg.appendChild(seat);
+
+                            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                            text.setAttribute('x', x);
+                            text.setAttribute('y', y + 5);
+                            text.setAttribute('text-anchor', 'middle');
+                            text.textContent = 'Open';
+                            svg.appendChild(text);
+                            continue;
+                        }
+
+                        if (i === gameState.dealerIndex) {
+                            const dealer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                            dealer.setAttribute('cx', x);
+                            dealer.setAttribute('cy', y - 40);
+                            dealer.setAttribute('r', '10');
+                            dealer.setAttribute('fill', '#000');
+                            svg.appendChild(dealer);
+                            const dealerText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                            dealerText.setAttribute('x', x);
+                            dealerText.setAttribute('y', y - 36);
+                            dealerText.setAttribute('text-anchor', 'middle');
+                            dealerText.setAttribute('fill', '#fff');
+                            dealerText.setAttribute('font-size', '12');
+                            dealerText.textContent = 'D';
+                            svg.appendChild(dealerText);
+                        }
+
+                        const nameText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                        nameText.setAttribute('x', x);
+                        nameText.setAttribute('y', y + 120);
+                        nameText.setAttribute('text-anchor', 'middle');
+                        nameText.setAttribute('fill', '#000');
+                        nameText.setAttribute('font-size', '16');
+                        nameText.textContent = player.name;
+                        svg.appendChild(nameText);
+
+                        const chipBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                        chipBox.setAttribute('x', x - 40);
+                        chipBox.setAttribute('y', y + 130);
+                        chipBox.setAttribute('width', '80');
+                        chipBox.setAttribute('height', '25');
+                        chipBox.setAttribute('fill', '#fff');
+                        chipBox.setAttribute('stroke', '#333');
+                        chipBox.setAttribute('stroke-width', '1');
+                        chipBox.setAttribute('rx', '5');
+                        svg.appendChild(chipBox);
+
+                        const chipText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                        chipText.setAttribute('x', x);
+                        chipText.setAttribute('y', y + 148);
+                        chipText.setAttribute('text-anchor', 'middle');
+                        chipText.setAttribute('fill', '#000');
+                        chipText.setAttribute('font-size', '14');
+                        chipText.textContent = player.chips;
+                        svg.appendChild(chipText);
+
+                        if (player.cards) {
+                            const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
+                            const isWinner = gameState.gameStage === 'showdown' && gameState.players[gameState.currentPlayerIndex]?.id === player.id;
+                            const yOffset = i === 0 ? 270 : y - 25;
+                            drawCard(showCards ? player.cards[0] : '?', x - 45, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
+                            drawCard(showCards ? player.cards[1] : '?', x + 15, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
+                        }
+
+                        const blindText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                        blindText.setAttribute('x', x);
+                        blindText.setAttribute('y', y + 100);
+                        blindText.setAttribute('text-anchor', 'middle');
+                        blindText.setAttribute('font-size', '12');
+                        const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
+                        const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
+                        if (gameState.players[smallBlindIndex]?.seat === i) blindText.textContent = 'SB';
+                        else if (gameState.players[bigBlindIndex]?.seat === i) blindText.textContent = 'BB';
+                        svg.appendChild(blindText);
+                    }
+
+                    const potText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    potText.setAttribute('x', '400');
+                    potText.setAttribute('y', '400');
+                    potText.setAttribute('text-anchor', 'middle');
+                    potText.setAttribute('fill', '#fff');
+                    potText.setAttribute('font-size', '20');
+                    potText.textContent = `Pot: ${gameState.pot}`;
+                    svg.appendChild(potText);
+
+                    const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === myPlayerId;
+                    const myPlayer = gameState.players.find(p => p && p.id === myPlayerId);
+                    betBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
+                    checkBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
+                    foldBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
+                    nextBtn.disabled = !myPlayer || gameState.hasBetThisRound.size !== gameState.players.length || !isMyTurn;
+                    sitDownBtn.style.display = isSpectating && gameState.players.length < 8 ? 'block' : 'none';
+                } catch (e) {
+                    errorMessage.textContent = 'Draw error: ' + e.message;
+                    console.error('Draw error:', e);
                 }
-                svg.appendChild(blindText);
             }
 
-            // Button controls
-            const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === myPlayerId;
-            const myPlayer = gameState.players.find(p => p.id === myPlayerId);
-            betBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
-            checkBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
-            foldBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
-            nextBtn.disabled = gameState.hasBetThisRound.size !== gameState.players.length || !isMyTurn;
-            sitDownBtn.style.display = isSpectating && gameState.players.length < 8 ? 'block' : 'none';
-        }
+            function drawCard(card, x, y, dim = false, highlight = false) {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', x);
+                rect.setAttribute('y', y);
+                rect.setAttribute('width', '60');
+                rect.setAttribute('height', '80');
+                rect.setAttribute('fill', '#fff');
+                rect.setAttribute('stroke', '#333');
+                rect.setAttribute('stroke-width', '2');
+                rect.setAttribute('rx', '5');
+                if (dim) rect.setAttribute('filter', 'url(#dim)');
+                if (highlight) {
+                    rect.setAttribute('filter', 'url(#glow)');
+                    rect.setAttribute('stroke', '#ffd700');
+                    rect.setAttribute('stroke-width', '3');
+                }
+                svg.appendChild(rect);
 
-        function sitDownAtSeat(seatIndex) {
-            if (!isSpectating) return;
-            const name = prompt("Enter your name:", "Player");
-            if (!name) return;
-            const chips = parseInt(prompt("Enter your starting chips (min 10):", "100")) || 100;
-            socket.emit('sitDown', { name, chips: Math.max(10, chips), seat: seatIndex });
-            isSpectating = false;
-        }
-
-        function toggleBetOptions() {
-            if (betBtn.disabled) return;
-            betPopup.style.display = betPopup.style.display === 'block' ? 'none' : 'block';
-        }
-
-        function bet(amount) {
-            const myPlayer = gameState.players.find(p => p.id === myPlayerId);
-            if (myPlayer && amount <= myPlayer.chips) {
-                socket.emit('bet', amount);
-                betPopup.style.display = 'none';
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', x + 30);
+                text.setAttribute('y', y + 45);
+                text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('fill', card.includes('♥') || card.includes('♦') ? '#d32f2f' : '#000');
+                text.setAttribute('font-size', '20');
+                text.textContent = card;
+                if (dim) text.setAttribute('filter', 'url(#dim)');
+                svg.appendChild(text);
             }
-        }
 
-        function advanceGame() {
-            // Rotate dealer and blinds
-            gameState.dealerIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-            socket.emit('advance');
-        }
-
-        // Initial blinds
-        socket.on('connect', () => {
-            if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
-                const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-                const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
-                socket.emit('bet', { amount: gameState.smallBlind, playerIndex: smallBlindIndex, auto: true });
-                socket.emit('bet', { amount: gameState.bigBlind, playerIndex: bigBlindIndex, auto: true });
+            function sitDown() {
+                sitDownAtSeat(0); // Default to first seat for sitDown button
             }
-        });
 
-        // Rest of the functions remain similar with minor adjustments
+            function sitDownAtSeat(seatIndex) {
+                if (!isSpectating) return;
+                const name = prompt("Enter your name:", "Player");
+                if (!name) return;
+                const chips = parseInt(prompt("Enter your starting chips (min 10):", "100")) || 100;
+                socket.emit('sitDown', { name, chips: Math.max(10, chips), seat: seatIndex });
+                isSpectating = false;
+            }
+
+            function toggleBetOptions() {
+                if (betBtn.disabled) return;
+                betPopup.style.display = betPopup.style.display === 'block' ? 'none' : 'block';
+            }
+
+            function bet(amount) {
+                const myPlayer = gameState.players.find(p => p.id === myPlayerId);
+                if (myPlayer && amount <= myPlayer.chips) {
+                    socket.emit('bet', amount);
+                    betPopup.style.display = 'none';
+                }
+            }
+
+            function betAllIn() {
+                const player = gameState.players.find(p => p.id === myPlayerId);
+                if (player) bet(player.chips);
+            }
+
+            function betCustom() {
+                const amount = parseInt(document.getElementById('customBet').value);
+                if (!isNaN(amount) && amount > 0) bet(amount);
+            }
+
+            function check() {
+                socket.emit('check');
+            }
+
+            function fold() {
+                socket.emit('fold');
+            }
+
+            function advanceGame() {
+                gameState.dealerIndex = (gameState.dealerIndex + 1) % gameState.players.length;
+                socket.emit('advance');
+            }
+
+            function togglePastHands() {
+                pastHandsMenu.style.display = pastHandsMenu.style.display === 'block' ? 'none' : 'block';
+                updatePastHandsMenu();
+            }
+
+            function updatePastHandsMenu() {
+                pastHandsMenu.innerHTML = '<h3>Past Hands</h3>';
+                gameState.pastHands.forEach((hand, index) => {
+                    const entry = document.createElement('div');
+                    entry.className = 'hand-entry';
+                    entry.innerHTML = `
+                        <strong>Hand ${index + 1} (Winner: ${hand.winner}, Pot: ${hand.pot})</strong><br>
+                        Community: ${hand.communityCards.join(', ')}<br>
+                        Preflop: ${hand.bets.preflop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                        Flop: ${hand.bets.flop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                        Turn: ${hand.bets.turn.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                        River: ${hand.bets.river.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                        Players: ${hand.players.map(p => `${p.name} (${p.cards.join(', ')}, ${p.chips} chips)`).join('; ')}
+                    `;
+                    pastHandsMenu.appendChild(entry);
+                });
+            }
+
+            socket.on('connect', () => {
+                if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
+                    const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
+                    const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
+                    socket.emit('bet', { amount: gameState.smallBlind, playerIndex: smallBlindIndex, auto: true });
+                    socket.emit('bet', { amount: gameState.bigBlind, playerIndex: bigBlindIndex, auto: true });
+                }
+            });
+
+        } catch (e) {
+            document.getElementById('errorMessage').textContent = 'Initialization error: ' + e.message;
+            console.error('Initialization error:', e);
+        }
     </script>
-    <!-- Previous Cloudflare scripts remain -->
 </body>
 </html>
