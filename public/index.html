@@ -79,15 +79,15 @@
             font-size: 14px;
         }
         #pastHandsBtn {
-            position: absolute;
-            bottom: -60px;
-            left: 0;
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
         }
         #pastHandsMenu {
             display: none;
-            position: absolute;
-            bottom: -50px;
-            left: 120px;
+            position: fixed;
+            bottom: 50px;
+            left: 10px;
             width: 300px;
             max-height: 400px;
             overflow-y: auto;
@@ -106,13 +106,16 @@
             opacity: 0.6;
             cursor: pointer;
         }
-        #spectatorCount {
+        #spectatorCount, #voiceChat {
             position: fixed;
             bottom: 10px;
             right: 10px;
             display: flex;
             align-items: center;
             gap: 5px;
+        }
+        #voiceChat {
+            right: 50px; /* Position to left of spectator count */
         }
         #errorMessage {
             color: red;
@@ -140,8 +143,11 @@
             <input id="customBet" type="number" min="1" placeholder="Custom">
             <button onclick="betCustom()">Go</button>
         </div>
-        <button id="pastHandsBtn" onclick="togglePastHands()">Past Hands</button>
-        <div id="pastHandsMenu"></div>
+    </div>
+    <button id="pastHandsBtn" onclick="togglePastHands()">Past Hands</button>
+    <div id="pastHandsMenu"></div>
+    <div id="voiceChat">
+        <button id="voiceToggle" onclick="toggleVoiceChat()">🎤</button>
     </div>
     <div id="spectatorCount">
         <svg width="20" height="20" viewBox="0 0 20 20">
@@ -152,7 +158,12 @@
 
     <script>
         try {
-            const socket = io('http://localhost:3000'); // Explicit server URL
+            // Socket.IO connection with fallback
+            const socket = io('http://localhost:3000', {
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
             const svg = document.getElementById('pokerSvg');
             const sitDownBtn = document.getElementById('sitDownBtn');
             const betBtn = document.getElementById('betBtn');
@@ -162,6 +173,7 @@
             const betPopup = document.getElementById('betPopup');
             const pastHandsMenu = document.getElementById('pastHandsMenu');
             const errorMessage = document.getElementById('errorMessage');
+            const voiceToggle = document.getElementById('voiceToggle');
 
             let gameState = {
                 players: [],
@@ -179,10 +191,13 @@
             };
             let myPlayerId = null;
             let isSpectating = true;
+            let localStream = null;
+            let peerConnections = {};
+            const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
             socket.on('connect', () => {
                 console.log('Connected to server');
-                drawScene(); // Initial draw on connect
+                drawScene();
             });
 
             socket.on('update', (state) => {
@@ -203,11 +218,38 @@
                 console.error('Socket.IO connection error:', error);
             });
 
+            // Voice chat signaling
+            socket.on('voiceSignal', async (data) => {
+                const { from, signal } = data;
+                if (!peerConnections[from]) {
+                    peerConnections[from] = new RTCPeerConnection(configuration);
+                    peerConnections[from].onicecandidate = ({ candidate }) => {
+                        if (candidate) socket.emit('voiceSignal', { to: from, signal: candidate });
+                    };
+                    peerConnections[from].ontrack = (event) => {
+                        const audio = new Audio();
+                        audio.srcObject = event.streams[0];
+                        audio.play();
+                    };
+                    if (localStream) peerConnections[from].addStream(localStream);
+                }
+
+                if (signal.type === 'offer') {
+                    await peerConnections[from].setRemoteDescription(new RTCSessionDescription(signal));
+                    const answer = await peerConnections[from].createAnswer();
+                    await peerConnections[from].setLocalDescription(answer);
+                    socket.emit('voiceSignal', { to: from, signal: answer });
+                } else if (signal.type === 'answer') {
+                    await peerConnections[from].setRemoteDescription(new RTCSessionDescription(signal));
+                } else if (signal.candidate) {
+                    await peerConnections[from].addIceCandidate(new RTCIceCandidate(signal));
+                }
+            });
+
             function drawScene() {
                 try {
                     console.log('Drawing scene');
                     svg.innerHTML = '';
-
                     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
                     const dimFilter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
                     dimFilter.setAttribute('id', 'dim');
@@ -394,7 +436,7 @@
             }
 
             function sitDown() {
-                sitDownAtSeat(0); // Default to first seat for sitDown button
+                sitDownAtSeat(0);
             }
 
             function sitDownAtSeat(seatIndex) {
@@ -463,6 +505,34 @@
                     `;
                     pastHandsMenu.appendChild(entry);
                 });
+            }
+
+            async function toggleVoiceChat() {
+                if (!localStream) {
+                    try {
+                        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        voiceToggle.style.background = '#4CAF50'; // Green when on
+                        Object.values(peerConnections).forEach(pc => pc.addStream(localStream));
+                        const pc = new RTCPeerConnection(configuration);
+                        pc.onicecandidate = ({ candidate }) => {
+                            if (candidate) socket.emit('voiceSignal', { to: null, signal: candidate });
+                        };
+                        pc.addStream(localStream);
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        socket.emit('voiceSignal', { to: null, signal: offer });
+                        peerConnections[myPlayerId] = pc; // Temporary self-reference
+                    } catch (e) {
+                        errorMessage.textContent = 'Voice chat error: ' + e.message;
+                        console.error('Voice chat error:', e);
+                    }
+                } else {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                    voiceToggle.style.background = '#1a73e8'; // Back to blue when off
+                    Object.values(peerConnections).forEach(pc => pc.close());
+                    peerConnections = {};
+                }
             }
 
             socket.on('connect', () => {
