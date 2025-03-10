@@ -5,34 +5,31 @@
     <title>Online Poker</title>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        body { display: flex; flex-direction: column; align-items: center; font-family: 'Montserrat', sans-serif; margin: 0; padding: 20px; background: #f0f2f5; min-height: 100vh; }
-        #pokerSvg { width: 800px; height: 600px; }
-        #controls { margin-top: 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: relative; display: none; }
-        button { padding: 10px 20px; font-size: 16px; border: none; border-radius: 5px; background: #1a73e8; color: white; cursor: pointer; transition: background 0.3s, transform 0.1s; }
+        body { display: flex; flex-direction: column; align-items: center; font-family: 'Montserrat', sans-serif; margin: 0; padding: 20px; background: #333; min-height: 100vh; color: #fff; }
+        #pokerSvg { width: 1000px; height: 750px; }
+        #controls { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+        button { padding: 8px 16px; font-size: 14px; border: none; border-radius: 5px; background: #1a73e8; color: white; cursor: pointer; }
         button:hover { background: #1557b0; }
-        button:active { transform: scale(0.98); }
-        button:disabled { background: #cccccc; cursor: not-allowed; }
-        #betPopup { position: absolute; top: -100px; left: 50%; transform: translateX(-50%); background: #fff; padding: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); display: none; z-index: 20; }
-        #pastHandsBtn { position: fixed; bottom: 10px; left: 10px; }
-        #pastHandsMenu { display: none; position: fixed; bottom: 50px; left: 10px; width: 300px; max-height: 400px; overflow-y: auto; background: #fff; border-radius: 5px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); padding: 10px; z-index: 10; }
-        .open-seat { opacity: 0.3; cursor: pointer; fill: #888; transition: opacity 0.3s; }
+        button:disabled { background: #666; cursor: not-allowed; }
+        #betPopup { position: absolute; top: -90px; left: 50%; transform: translateX(-50%); background: #444; padding: 8px; border-radius: 5px; box-shadow: 0 2px 4px rgba(255,255,255,0.2); display: none; z-index: 20; color: #fff; }
+        #gameLogBtn { position: fixed; bottom: 130px; left: 10px; }
+        #gameLogMenu { display: none; position: fixed; bottom: 170px; left: 10px; width: 300px; max-height: 400px; overflow-y: auto; background: #444; border-radius: 5px; box-shadow: 0 4px 6px rgba(255,255,255,0.1); padding: 8px; color: #fff; }
+        .open-seat { opacity: 0.3; cursor: pointer; fill: #888; }
         .open-seat:hover { opacity: 0.6; filter: url(#glow); }
-        #spectatorCount, #voiceChat { position: fixed; bottom: 10px; right: 10px; display: flex; align-items: center; gap: 5px; }
-        #voiceChat { right: 50px; }
-        #errorMessage { color: red; position: fixed; top: 10px; left: 10px; }
-        #chatContainer { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); width: 400px; max-height: 250px; background: #fff; border-radius: 5px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); z-index: 10; display: none; overflow: hidden; }
-        #chatMessages { max-height: 200px; overflow-y: auto; padding: 10px; }
-        #chatInput { width: 100%; padding: 10px; border: none; border-top: 1px solid #ccc; outline: none; box-sizing: border-box; }
-        .chat-message { margin-bottom: 5px; }
-        .chat-message .player-name { font-weight: bold; }
-        .player-box { transform: translateY(-20px); }
-        .bet-ellipse { fill: #ffeb3b; stroke: #333; stroke-width: 1; }
+        #spectatorCount { position: fixed; top: 10px; right: 10px; display: flex; align-items: center; gap: 5px; color: #fff; }
+        #voiceChat { position: fixed; bottom: 10px; right: 10px; }
+        #errorMessage { color: #ff4444; position: fixed; top: 10px; left: 10px; }
+        #chatContainer { position: fixed; bottom: 10px; left: 10px; width: 300px; max-height: 120px; background: #444; border-radius: 5px; box-shadow: 0 4px 6px rgba(255,255,255,0.1); display: none; }
+        #chatMessages { max-height: 80px; overflow-y: auto; padding: 8px; color: #fff; }
+        #chatInput { width: 100%; padding: 8px; border: none; border-top: 1px solid #666; outline: none; box-sizing: border-box; background: #333; color: #fff; }
+        .bet-chip { fill: #ffeb3b; stroke: #fff; stroke-width: 2; }
     </style>
 </head>
 <body>
     <div id="errorMessage"></div>
-    <div id="configScreen" style="display: block; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.2);">
+    <div id="configScreen" style="display: block; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #444; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(255,255,255,0.2); color: #fff;">
         <h2>Configure Game</h2>
         <label>Small Blind: <input type="number" id="smallBlind" min="1" value="5"></label><br>
         <label>Big Blind: <input type="number" id="bigBlind" min="2" value="10"></label><br>
@@ -40,29 +37,28 @@
         <label>Maximum Buy-In: <input type="number" id="maxBuyIn" min="10" value="1000"></label><br>
         <button onclick="configureGame()">Start Game</button>
     </div>
-    <svg id="pokerSvg" viewBox="0 0 800 600" style="display: none;"></svg>
-    <div id="controls">
+    <svg id="pokerSvg" viewBox="0 0 1000 750" style="display: none;"></svg>
+    <div id=" çıkıyor">
         <button id="betBtn" onclick="toggleBetOptions()" disabled>Bet</button>
+        <button id="raiseBtn" onclick="toggleBetOptions()" disabled style="display: none;">Raise</button>
         <button id="callBtn" onclick="call()" disabled style="display: none;">Call</button>
         <button id="checkBtn" onclick="check()" disabled>Check</button>
         <button id="foldBtn" onclick="fold()" disabled>Fold</button>
         <div id="betPopup">
-            <button onclick="bet(10)">10</button>
             <button onclick="bet(Math.floor(gameState.pot / 4))">1/4 Pot</button>
             <button onclick="bet(Math.floor(gameState.pot / 2))">1/2 Pot</button>
             <button onclick="bet(gameState.pot)">Pot</button>
-            <button onclick="betAllIn()">All-In</button>
-            <input id="customBet" type="number" min="1" placeholder="Custom">
+            <input id="customBet" type="number" min="1" placeholder="Custom" style="width: 60px; padding: 4px;">
             <button onclick="betCustom()">Go</button>
         </div>
     </div>
-    <button id="pastHandsBtn" onclick="togglePastHands()">Past Hands</button>
-    <div id="pastHandsMenu"></div>
+    <button id="gameLogBtn" onclick="toggleGameLog()">Game Log</button>
+    <div id="gameLogMenu"></div>
     <div id="voiceChat">
         <button id="voiceToggle" onclick="toggleVoiceChat()" title="Click to enable mic">🎤</button>
     </div>
     <div id="spectatorCount">
-        <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 5C4 5 0 10 0 10s4 5 10 5 10-5 10-5-4-5-10-5zm0 8c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3z"/></svg>
+        <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 5C4 5 0 10 0 10s4 5 10 5 10-5 10-5-4-5-10-5zm0 8c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3z" fill="#fff"/></svg>
         <span id="spectatorNum">0</span>
     </div>
     <div id="chatContainer">
@@ -71,166 +67,65 @@
     </div>
 
     <script>
-        const CONFIG = {
-            MAX_PLAYERS: 8,
-            CARD_WIDTH: 60,
-            CARD_SPACING: 10,
-            TABLE_WIDTH: 800,
-            TABLE_HEIGHT: 600,
-            MIN_CHIPS: 10
+        const CONFIG = { MAX_PLAYERS: 8, CARD_WIDTH: 60, CARD_HEIGHT: 84, POT_CARD_WIDTH: 120, POT_CARD_HEIGHT: 168, CARD_SPACING: 10, TABLE_WIDTH: 1000, TABLE_HEIGHT: 750, MIN_CHIPS: 10 };
+        const socket = io(window.location.origin, { transports: ['websocket'], reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 1000 });
+        const peer = new Peer({ host: 'localhost', port: 9000, path: '/peerjs' });
+        const elements = {
+            configScreen: document.getElementById('configScreen'), svg: document.getElementById('pokerSvg'), controls: document.getElementById('controls'),
+            betBtn: document.getElementById('betBtn'), raiseBtn: document.getElementById('raiseBtn'), callBtn: document.getElementById('callBtn'), 
+            checkBtn: document.getElementById('checkBtn'), foldBtn: document.getElementById('foldBtn'), betPopup: document.getElementById('betPopup'), 
+            gameLogMenu: document.getElementById('gameLogMenu'), errorMessage: document.getElementById('errorMessage'), 
+            voiceToggle: document.getElementById('voiceToggle'), spectatorNum: document.getElementById('spectatorNum'),
+            chatContainer: document.getElementById('chatContainer'), chatMessages: document.getElementById('chatMessages'), chatInput: document.getElementById('chatInput')
         };
 
-        const socket = io(window.location.origin, {
-            transports: ['websocket'],
-            reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            timeout: 20000
+        let gameState = { players: [], communityCards: [], gameStage: 'waiting', pot: 0, currentPlayerIndex: 0, dealerIndex: 0, hasBetThisRound: new Set(),
+            pastHands: [], currentHandBets: { preflop: [], flop: [], turn: [], river: [] }, spectators: 0, smallBlind: 5, bigBlind: 10,
+            seats: Array(CONFIG.MAX_PLAYERS).fill(null), isConfigured: false, currentBet: 0, playerBets: {} };
+        let myPlayerId = localStorage.getItem('myPlayerId') || null;
+        let isSpectating = true, myName = null, voiceActive = false, mediaStream = null, calls = [];
+
+        socket.on('connect', () => {
+            myPlayerId = socket.id;
+            localStorage.setItem('myPlayerId', myPlayerId);
+            socket.emit('rejoin', { playerId: myPlayerId });
+            debouncedDrawScene();
         });
 
-        const elements = {
-            configScreen: document.getElementById('configScreen'),
-            svg: document.getElementById('pokerSvg'),
-            controls: document.getElementById('controls'),
-            betBtn: document.getElementById('betBtn'),
-            callBtn: document.getElementById('callBtn'),
-            checkBtn: document.getElementById('checkBtn'),
-            foldBtn: document.getElementById('foldBtn'),
-            betPopup: document.getElementById('betPopup'),
-            pastHandsMenu: document.getElementById('pastHandsMenu'),
-            errorMessage: document.getElementById('errorMessage'),
-            voiceToggle: document.getElementById('voiceToggle'),
-            spectatorNum: document.getElementById('spectatorNum'),
-            chatContainer: document.getElementById('chatContainer'),
-            chatMessages: document.getElementById('chatMessages'),
-            chatInput: document.getElementById('chatInput')
-        };
+        socket.on('update', (state) => {
+            gameState = { ...state, hasBetThisRound: new Set(state.hasBetThisRound), playerBets: state.playerBets || {} };
+            elements.spectatorNum.textContent = Math.max(0, gameState.spectators);
+            toggleGameDisplay(gameState.isConfigured);
+            debouncedDrawScene();
+        });
 
-        let gameState = {
-            players: [],
-            communityCards: [],
-            gameStage: 'waiting',
-            pot: 0,
-            currentPlayerIndex: 0,
-            dealerIndex: 0,
-            hasBetThisRound: new Set(),
-            pastHands: [],
-            currentHandBets: { preflop: [], flop: [], turn: [], river: [] },
-            spectators: 0,
-            smallBlind: 5,
-            bigBlind: 10,
-            seats: Array(CONFIG.MAX_PLAYERS).fill(null),
-            isConfigured: false,
-            currentBet: 0,
-            playerBets: {} // Track bets per player
-        };
-        let myPlayerId = localStorage.getItem('myPlayerId') || null;
-        let isSpectating = true;
-        let localStream = null;
-        let peerConnections = {};
-        const configuration = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                // { urls: 'turn:your-turn-server:3478', username: 'your-username', credential: 'your-credential' }
-            ]
-        };
-        let myName = null;
+        socket.on('chatMessage', ({ name, message }) => {
+            const msgDiv = document.createElement('div');
+            msgDiv.textContent = `${name}: ${message}`;
+            elements.chatMessages.appendChild(msgDiv);
+            elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+        });
 
-        function handleError(type, error) {
-            const timestamp = new Date().toISOString();
-            console.error(`${type} error at ${timestamp}:`, error);
-            elements.errorMessage.textContent = `${type}: ${error.message}`;
-            setTimeout(() => elements.errorMessage.textContent = '', 3000);
-        }
+        socket.on('voiceSignal', ({ from, signal }) => {
+            const call = peer.call(from, mediaStream);
+            call.on('stream', (remoteStream) => {
+                const audio = new Audio();
+                audio.srcObject = remoteStream;
+                audio.play();
+            });
+            call.on('signal', (data) => socket.emit('voiceSignal', { to: from, signal: data }));
+        });
 
-        const socketEvents = {
-            connect: () => {
-                myPlayerId = socket.id;
-                localStorage.setItem('myPlayerId', myPlayerId);
-                elements.errorMessage.textContent = 'Connected!';
-                setTimeout(() => elements.errorMessage.textContent = '', 2000);
-                socket.emit('rejoin', { playerId: myPlayerId });
-                debouncedDrawScene();
-            },
-            update: (state) => {
-                try {
-                    gameState = { ...state, hasBetThisRound: new Set(state.hasBetThisRound || []), playerBets: state.playerBets || {} };
-                    elements.spectatorNum.textContent = gameState.spectators || 0;
-                    updateCallCheckButton();
-                    toggleGameDisplay(gameState.isConfigured);
-                    debouncedDrawScene();
-                } catch (e) {
-                    handleError('Update', e);
-                }
-            },
-            rejoin: (state) => {
-                gameState = { ...state, hasBetThisRound: new Set(state.hasBetThisRound || []), playerBets: state.playerBets || {} };
-                debouncedDrawScene();
-            },
-            voiceSignal: async ({ from, signal }) => {
-                console.log('Received voice signal from:', from, signal);
-                if (!peerConnections[from]) {
-                    const pc = new RTCPeerConnection(configuration);
-                    peerConnections[from] = pc;
-
-                    pc.onicecandidate = ({ candidate }) => {
-                        if (candidate) {
-                            console.log('Sending ICE candidate to:', from);
-                            socket.emit('voiceSignal', { to: from, signal: candidate });
-                        }
-                    };
-
-                    pc.ontrack = (event) => {
-                        console.log('Received remote track from:', from);
-                        const audio = new Audio();
-                        audio.srcObject = event.streams[0];
-                        audio.autoplay = true;
-                        audio.volume = 0.5;
-                        document.body.appendChild(audio);
-                    };
-
-                    pc.oniceconnectionstatechange = () => {
-                        console.log(`ICE connection state for ${from}:`, pc.iceConnectionState);
-                        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-                            pc.close();
-                            delete peerConnections[from];
-                        }
-                    };
-
-                    if (localStream) {
-                        localStream.getAudioTracks().forEach(track => pc.addTrack(track, localStream));
-                    }
-                }
-
-                const pc = peerConnections[from];
-                try {
-                    if (signal.type === 'offer') {
-                        await pc.setRemoteDescription(new RTCSessionDescription(signal));
-                        const answer = await pc.createAnswer();
-                        await pc.setLocalDescription(answer);
-                        socket.emit('voiceSignal', { to: from, signal: answer });
-                    } else if (signal.type === 'answer') {
-                        await pc.setRemoteDescription(new RTCSessionDescription(signal));
-                    } else if (signal.candidate) {
-                        await pc.addIceCandidate(new RTCIceCandidate(signal));
-                    }
-                } catch (e) {
-                    console.error('Voice signal error:', e);
-                }
-            },
-            chatMessage: ({ name, message }) => {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'chat-message';
-                messageDiv.innerHTML = `<span class="player-name">${name}:</span> ${message}`;
-                elements.chatMessages.appendChild(messageDiv);
-                elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
-            },
-            configError: (message) => handleError('Config', new Error(message)),
-            sitDownError: (message) => handleError('Sit Down', new Error(message))
-        };
-
-        Object.entries(socketEvents).forEach(([event, handler]) => socket.on(event, handler));
+        peer.on('open', (id) => myPlayerId = id);
+        peer.on('call', (call) => {
+            call.answer(mediaStream);
+            call.on('stream', (remoteStream) => {
+                const audio = new Audio();
+                audio.srcObject = remoteStream;
+                audio.play();
+            });
+            calls.push(call);
+        });
 
         function toggleGameDisplay(isConfigured) {
             elements.configScreen.style.display = isConfigured ? 'none' : 'block';
@@ -240,322 +135,138 @@
         }
 
         function drawScene() {
-            elements.svg.innerHTML = '';
-            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-            defs.innerHTML = `
+            elements.svg.innerHTML = `<defs>
                 <filter id="dim"><feColorMatrix type="matrix" values="0.5 0 0 0 0  0 0.5 0 0 0  0 0 0.5 0 0  0 0 0 0.5 0"/></filter>
                 <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
                 <radialGradient id="tableGradient"><stop offset="0%" style="stop-color: #2e7d32;" /><stop offset="100%" style="stop-color: #1b5e20;" /></radialGradient>
-            `;
-            elements.svg.appendChild(defs);
+                <pattern id="cardBack" width="1" height="1" patternUnits="objectBoundingBox">
+                    <rect width="${CONFIG.CARD_WIDTH}" height="${CONFIG.CARD_HEIGHT}" fill="#8B0000"/>
+                    <path d="M30,42 L42,30 M30,30 L42,42" stroke="#fff" stroke-width="2" opacity="0.3"/>
+                    <text x="50%" y="50%" text-anchor="middle" fill="rgba(255,255,255,0.2)" font-size="12" dy=".3em">Deal Me In</text>
+                </pattern>
+            </defs>
+            <ellipse cx="500" cy="375" rx="400" ry="300" fill="url(#tableGradient)" ${gameState.gameStage === 'showdown' ? 'filter="url(#dim)"' : ''} />`;
 
-            const table = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-            table.setAttribute('cx', '400');
-            table.setAttribute('cy', '300');
-            table.setAttribute('rx', '300');
-            table.setAttribute('ry', '200');
-            table.setAttribute('fill', 'url(#tableGradient)');
-            if (gameState.gameStage === 'showdown') table.setAttribute('filter', 'url(#dim)');
-            elements.svg.appendChild(table);
-
-            const totalWidth = gameState.communityCards.length * CONFIG.CARD_WIDTH + (gameState.communityCards.length - 1) * CONFIG.CARD_SPACING;
-            const startX = 400 - totalWidth / 2;
-            gameState.communityCards.forEach((card, i) => {
-                if (card) drawCard(card, startX + i * (CONFIG.CARD_WIDTH + CONFIG.CARD_SPACING), 270, gameState.gameStage === 'showdown');
-            });
+            const totalWidth = gameState.communityCards.length * CONFIG.POT_CARD_WIDTH + (gameState.communityCards.length - 1) * CONFIG.CARD_SPACING;
+            const startX = 500 - totalWidth / 2;
+            gameState.communityCards.forEach((card, i) => card && drawPotCard(card, startX + i * (CONFIG.POT_CARD_WIDTH + CONFIG.CARD_SPACING), 375 - CONFIG.POT_CARD_HEIGHT / 2, gameState.gameStage === 'showdown'));
 
             for (let i = 0; i < CONFIG.MAX_PLAYERS; i++) {
                 const angle = (i / CONFIG.MAX_PLAYERS) * 2 * Math.PI;
-                const x = 400 + 220 * Math.cos(angle);
-                const y = 300 + 130 * Math.sin(angle);
+                const x = 500 + 300 * Math.cos(angle), y = 375 + 200 * Math.sin(angle);
                 const player = gameState.players.find(p => p && p.seat === i);
 
-                if (!player) {
-                    const seatGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-                    seatGroup.setAttribute('class', 'open-seat');
-                    seatGroup.onclick = () => sitDownAtSeat(i);
-
-                    const seat = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                    seat.setAttribute('cx', x);
-                    seat.setAttribute('cy', y);
-                    seat.setAttribute('r', '25');
-                    seat.setAttribute('fill', '#888');
-                    seatGroup.appendChild(seat);
-
-                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    text.setAttribute('x', x);
-                    text.setAttribute('y', y + 5);
-                    text.setAttribute('text-anchor', 'middle');
-                    text.setAttribute('fill', '#000');
-                    text.setAttribute('font-size', '12');
-                    text.textContent = 'Sit';
-                    seatGroup.appendChild(text);
-
-                    elements.svg.appendChild(seatGroup);
+                if (!player && isSpectating) {
+                    elements.svg.innerHTML += `<g class="open-seat" onclick="sitDownAtSeat(${i})">
+                        <circle cx="${x}" cy="${y}" r="25" fill="#888"/>
+                        <text x="${x}" y="${y + 5}" text-anchor="middle" fill="#fff" font-size="12">Sit</text>
+                    </g>`;
                     continue;
                 }
-
-                drawPlayerBox(player, x, y, i);
-                const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
-                const isWinner = gameState.gameStage === 'showdown' && gameState.players[gameState.currentPlayerIndex]?.id === player.id;
-                const yOffset = i === 0 ? 270 : y - 25;
-                if (player.cards?.[0]) drawCard(showCards ? player.cards[0] : '?', x - 45, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
-                if (player.cards?.[1]) drawCard(showCards ? player.cards[1] : '?', x + 15, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
-
-                // Display player's bet
-                const betAmount = gameState.playerBets[player.id] || 0;
-                if (betAmount > 0) {
-                    const betEllipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-                    betEllipse.setAttribute('cx', x);
-                    betEllipse.setAttribute('cy', y + 30);
-                    betEllipse.setAttribute('rx', '20');
-                    betEllipse.setAttribute('ry', '15');
-                    betEllipse.setAttribute('class', 'bet-ellipse');
-                    elements.svg.appendChild(betEllipse);
-
-                    const betText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    betText.setAttribute('x', x);
-                    betText.setAttribute('y', y + 35);
-                    betText.setAttribute('text-anchor', 'middle');
-                    betText.setAttribute('fill', '#000');
-                    betText.setAttribute('font-size', '12');
-                    betText.textContent = betAmount;
-                    elements.svg.appendChild(betText);
+                if (player) {
+                    drawPlayerBox(player, x, y, i);
+                    const betAmount = gameState.playerBets[player.id] || 0;
+                    if (betAmount > 0) {
+                        const rx = Math.max(20, Math.min(40, betAmount.toString().length * 10));
+                        elements.svg.innerHTML += `<ellipse cx="${x}" cy="${y + 30}" rx="${rx}" ry="20" class="bet-chip"/><text x="${x}" y="${y + 35}" text-anchor="middle" fill="#000" font-size="16" font-weight="bold">${betAmount}</text>`;
+                    }
                 }
             }
-
-            const potText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            potText.setAttribute('x', '400');
-            potText.setAttribute('y', '400');
-            potText.setAttribute('text-anchor', 'middle');
-            potText.setAttribute('fill', '#fff');
-            potText.setAttribute('font-size', '20');
-            potText.textContent = `Pot: ${gameState.pot}`;
-            elements.svg.appendChild(potText);
-
+            elements.svg.innerHTML += `<text x="500" y="500" text-anchor="middle" fill="#fff" font-size="20">Pot: ${gameState.pot}</text>`;
             updateButtonStates();
         }
 
         function drawPlayerBox(player, x, y, i) {
             const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === player.id;
             const isDealer = i === gameState.dealerIndex;
-            const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-            const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
+            const boxX = x > 500 ? x + 40 : x - 200, boxY = y > 375 ? y + 40 : y - 140;
 
-            const playerBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            playerBox.setAttribute('x', x - 70);
-            playerBox.setAttribute('y', y + 60);
-            playerBox.setAttribute('width', '140');
-            playerBox.setAttribute('height', '70');
-            playerBox.setAttribute('fill', '#ffffff');
-            playerBox.setAttribute('stroke', isMyTurn ? '#ffd700' : '#333');
-            playerBox.setAttribute('stroke-width', isMyTurn ? '3' : '1');
-            playerBox.setAttribute('rx', '10');
-            playerBox.setAttribute('filter', 'url(#glow)');
-            playerBox.setAttribute('class', 'player-box');
-            elements.svg.appendChild(playerBox);
-
-            const nameText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            nameText.setAttribute('x', x);
-            nameText.setAttribute('y', y + 80);
-            nameText.setAttribute('text-anchor', 'middle');
-            nameText.setAttribute('fill', '#000');
-            nameText.setAttribute('font-size', '16');
-            nameText.setAttribute('font-weight', 'bold');
-            nameText.textContent = player.name;
-            elements.svg.appendChild(nameText);
-
-            const chipBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            chipBox.setAttribute('x', x - 50);
-            chipBox.setAttribute('y', y + 90);
-            chipBox.setAttribute('width', '100');
-            chipBox.setAttribute('height', '25');
-            chipBox.setAttribute('fill', '#ffd700');
-            chipBox.setAttribute('rx', '5');
-            elements.svg.appendChild(chipBox);
-
-            const chipText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            chipText.setAttribute('x', x);
-            chipText.setAttribute('y', y + 108);
-            chipText.setAttribute('text-anchor', 'middle');
-            chipText.setAttribute('fill', '#000');
-            chipText.setAttribute('font-size', '14');
-            chipText.textContent = `$${player.chips}`;
-            elements.svg.appendChild(chipText);
-
-            if (isDealer) {
-                const dealerChip = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                dealerChip.setAttribute('cx', x + 60);
-                dealerChip.setAttribute('cy', y + 70);
-                dealerChip.setAttribute('r', '10');
-                dealerChip.setAttribute('fill', '#000');
-                elements.svg.appendChild(dealerChip);
-                const dealerText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                dealerText.setAttribute('x', x + 60);
-                dealerText.setAttribute('y', y + 75);
-                dealerText.setAttribute('text-anchor', 'middle');
-                dealerText.setAttribute('fill', '#fff');
-                dealerText.setAttribute('font-size', '12');
-                dealerText.textContent = 'D';
-                elements.svg.appendChild(dealerText);
-            }
-
-            if (gameState.players[smallBlindIndex]?.seat === i) {
-                const sbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                sbText.setAttribute('x', x - 60);
-                sbText.setAttribute('y', y + 75);
-                sbText.setAttribute('text-anchor', 'middle');
-                sbText.setAttribute('fill', '#000');
-                sbText.setAttribute('font-size', '12');
-                sbText.textContent = 'SB';
-                elements.svg.appendChild(sbText);
-            } else if (gameState.players[bigBlindIndex]?.seat === i) {
-                const bbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                bbText.setAttribute('x', x - 60);
-                bbText.setAttribute('y', y + 75);
-                bbText.setAttribute('text-anchor', 'middle');
-                bbText.setAttribute('fill', '#000');
-                bbText.setAttribute('font-size', '12');
-                bbText.textContent = 'BB';
-                elements.svg.appendChild(bbText);
-            }
+            elements.svg.innerHTML += `
+                <rect x="${boxX}" y="${boxY}" width="160" height="100" fill="#444" stroke="${isMyTurn ? '#ffd700' : '#fff'}" stroke-width="${isMyTurn ? '3' : '1'}" rx="10" filter="url(#glow)"/>
+                <text x="${boxX + 80}" y="${boxY + 20}" text-anchor="middle" fill="#fff" font-size="16" font-weight="bold">${player.name}</text>
+                <text x="${boxX + 80}" y="${boxY + 40}" text-anchor="middle" fill="#fff" font-size="14">$${player.chips}</text>
+                ${isDealer ? `<circle cx="${boxX + 130}" cy="${boxY + 80}" r="10" fill="#000"/><text x="${boxX + 130}" y="${boxY + 85}" text-anchor="middle" fill="#fff" font-size="12">D</text>` : ''}
+            `;
+            const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
+            const isWinner = gameState.gameStage === 'showdown' && gameState.players[gameState.currentPlayerIndex]?.id === player.id;
+            if (player.cards?.[0]) drawCard(showCards ? player.cards[0] : 'back', boxX + 55, boxY + 50, !isWinner && gameState.gameStage === 'showdown', isWinner, -10);
+            if (player.cards?.[1]) drawCard(showCards ? player.cards[1] : 'back', boxX + 95, boxY + 50, !isWinner && gameState.gameStage === 'showdown', isWinner, 10);
         }
 
-        function drawCard(card, x, y, dim = false, highlight = false) {
+        function drawCard(card, x, y, dim, highlight, rotate = 0) {
             if (!card) return;
-            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            rect.setAttribute('x', x);
-            rect.setAttribute('y', y);
-            rect.setAttribute('width', CONFIG.CARD_WIDTH);
-            rect.setAttribute('height', '80');
-            rect.setAttribute('fill', '#fff');
-            rect.setAttribute('stroke', highlight ? '#ffd700' : '#333');
-            rect.setAttribute('stroke-width', highlight ? '3' : '2');
-            rect.setAttribute('rx', '5');
-            if (dim) rect.setAttribute('filter', 'url(#dim)');
-            if (highlight) rect.setAttribute('filter', 'url(#glow)');
-            elements.svg.appendChild(rect);
+            const isBack = card === 'back';
+            const suit = isBack ? '' : card.slice(-1), rank = isBack ? '' : card.slice(0, -1), color = suit === '♥' || suit === '♦' ? '#d32f2f' : '#000';
+            elements.svg.innerHTML += `
+                <rect x="${x}" y="${y}" width="${CONFIG.CARD_WIDTH}" height="${CONFIG.CARD_HEIGHT}" fill="${isBack ? 'url(#cardBack)' : '#fff'}" stroke="${highlight ? '#ffd700' : '#000'}" stroke-width="${highlight ? '3' : '2'}" rx="5" transform="rotate(${rotate}, ${x + CONFIG.CARD_WIDTH / 2}, ${y + CONFIG.CARD_HEIGHT / 2})" ${dim ? 'filter="url(#dim)"' : ''} ${highlight ? 'filter="url(#glow)"' : ''}/>
+                ${!isBack ? `<text x="${x + 10}" y="${y + 30}" text-anchor="start" fill="${color}" font-size="24" font-weight="bold" transform="rotate(${rotate}, ${x + CONFIG.CARD_WIDTH / 2}, ${y + CONFIG.CARD_HEIGHT / 2})" ${dim ? 'filter="url(#dim)"' : ''}>${rank}</text>
+                    <text x="${x + CONFIG.CARD_WIDTH - 10}" y="${y + CONFIG.CARD_HEIGHT - 10}" text-anchor="end" fill="${color}" font-size="36" font-weight="bold" transform="rotate(${rotate}, ${x + CONFIG.CARD_WIDTH / 2}, ${y + CONFIG.CARD_HEIGHT / 2})" ${dim ? 'filter="url(#dim)"' : ''}>${suit}</text>` : ''}
+            `;
+        }
 
-            if (card === '?') {
-                const backText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                backText.setAttribute('x', x + CONFIG.CARD_WIDTH / 2);
-                backText.setAttribute('y', y + 45);
-                backText.setAttribute('text-anchor', 'middle');
-                backText.setAttribute('fill', '#000');
-                backText.setAttribute('font-size', '20');
-                backText.textContent = '?';
-                if (dim) backText.setAttribute('filter', 'url(#dim)');
-                elements.svg.appendChild(backText);
-                return;
-            }
-
-            const rank = card.slice(0, -1);
-            const suit = card.slice(-1);
-
-            const rankText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            rankText.setAttribute('x', x + 10);
-            rankText.setAttribute('y', y + 20);
-            rankText.setAttribute('text-anchor', 'start');
-            rankText.setAttribute('fill', suit === '♥' || suit === '♦' ? '#d32f2f' : '#000');
-            rankText.setAttribute('font-size', '24');
-            rankText.setAttribute('font-weight', 'bold');
-            rankText.textContent = rank;
-            if (dim) rankText.setAttribute('filter', 'url(#dim)');
-            elements.svg.appendChild(rankText);
-
-            const suitText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            suitText.setAttribute('x', x + 10);
-            suitText.setAttribute('y', y + 70);
-            suitText.setAttribute('text-anchor', 'start');
-            suitText.setAttribute('fill', suit === '♥' || suit === '♦' ? '#d32f2f' : '#000');
-            suitText.setAttribute('font-size', '30');
-            suitText.setAttribute('font-weight', 'bold');
-            suitText.textContent = suit;
-            if (dim) suitText.setAttribute('filter', 'url(#dim)');
-            elements.svg.appendChild(suitText);
+        function drawPotCard(card, x, y, dim) {
+            const suit = card.slice(-1), rank = card.slice(0, -1), color = suit === '♥' || suit === '♦' ? '#d32f2f' : '#000';
+            elements.svg.innerHTML += `
+                <rect x="${x}" y="${y}" width="${CONFIG.POT_CARD_WIDTH}" height="${CONFIG.POT_CARD_HEIGHT}" fill="#fff" stroke="#000" stroke-width="2" rx="10" ${dim ? 'filter="url(#dim)"' : ''}/>
+                <text x="${x + 15}" y="${y + 50}" text-anchor="start" fill="${color}" font-size="36" font-weight="bold" ${dim ? 'filter="url(#dim)"' : ''}>${rank}</text>
+                <text x="${x + CONFIG.POT_CARD_WIDTH - 15}" y="${y + CONFIG.POT_CARD_HEIGHT - 20}" text-anchor="end" fill="${color}" font-size="48" font-weight="bold" ${dim ? 'filter="url(#dim)"' : ''}>${suit}</text>
+            `;
         }
 
         function updateButtonStates() {
-            const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === myPlayerId;
             const myPlayer = gameState.players.find(p => p && p.id === myPlayerId);
+            if (!myPlayer) return;
+            const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === myPlayerId;
             const isActiveGame = gameState.gameStage !== 'waiting' && gameState.gameStage !== 'showdown';
-            const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-            const isSmallBlind = myPlayerId && gameState.players[smallBlindIndex]?.id === myPlayerId;
             const playerBet = gameState.playerBets[myPlayerId] || 0;
-            const hasUncalledBet = gameState.currentBet > playerBet && !gameState.hasBetThisRound.has(myPlayerId);
-            const mustCall = isSmallBlind && gameState.currentBet > gameState.smallBlind;
+            const hasUncalledBet = gameState.currentBet > playerBet;
 
-            elements.betBtn.disabled = !isMyTurn || !myPlayer || !isActiveGame;
-            elements.callBtn.disabled = !isMyTurn || !myPlayer || !isActiveGame || !hasUncalledBet;
-            elements.callBtn.style.display = (hasUncalledBet || mustCall) ? 'inline' : 'none';
-            elements.checkBtn.disabled = !isMyTurn || !myPlayer || !isActiveGame || hasUncalledBet || mustCall;
-            elements.checkBtn.style.display = (hasUncalledBet || mustCall) ? 'none' : 'inline';
-            elements.foldBtn.disabled = !isMyTurn || !myPlayer || !isActiveGame;
+            elements.betBtn.disabled = !isMyTurn || !isActiveGame || hasUncalledBet;
+            elements.betBtn.style.display = hasUncalledBet ? 'none' : 'inline';
+            elements.raiseBtn.disabled = !isMyTurn || !isActiveGame || !hasUncalledBet;
+            elements.raiseBtn.style.display = hasUncalledBet ? 'inline' : 'none';
+            elements.callBtn.disabled = !isMyTurn || !isActiveGame || !hasUncalledBet;
+            elements.callBtn.style.display = hasUncalledBet ? 'inline' : 'none';
+            elements.checkBtn.disabled = !isMyTurn || !isActiveGame || hasUncalledBet;
+            elements.checkBtn.style.display = hasUncalledBet ? 'none' : 'inline';
+            elements.foldBtn.disabled = !isMyTurn || !isActiveGame;
         }
 
-        function updateCallCheckButton() {
-            const myPlayer = gameState.players.find(p => p.id === myPlayerId);
-            if (!myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown') return;
-
-            const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-            const isSmallBlind = myPlayerId && gameState.players[smallBlindIndex]?.id === myPlayerId;
-            const playerBet = gameState.playerBets[myPlayerId] || 0;
-            const hasUncalledBet = gameState.currentBet > playerBet && !gameState.hasBetThisRound.has(myPlayerId);
-            const mustCall = isSmallBlind && gameState.currentBet > gameState.smallBlind;
-
-            elements.callBtn.style.display = (hasUncalledBet || mustCall) ? 'inline' : 'none';
-            elements.checkBtn.style.display = (hasUncalledBet || mustCall) ? 'none' : 'inline';
-        }
-
+        const debouncedDrawScene = debounce(drawScene, 100);
         function debounce(func, wait) {
             let timeout;
-            return (...args) => {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func(...args), wait);
-            };
+            return () => { clearTimeout(timeout); timeout = setTimeout(func, wait); };
         }
-        const debouncedDrawScene = debounce(drawScene, 100);
 
         function sitDownAtSeat(seatIndex) {
             if (!isSpectating) return;
-            const name = prompt("Enter your name:", "Player") || "Player";
-            myName = name;
+            myName = prompt("Enter your name:", "Player") || "Player";
             const chips = Math.max(CONFIG.MIN_CHIPS, parseInt(prompt("Enter your starting chips (min 10):", "100")) || 100);
-            socket.emit('sitDown', { name, chips, seat: seatIndex });
+            socket.emit('sitDown', { name: myName, chips, seat: seatIndex });
             isSpectating = false;
         }
 
         function toggleBetOptions() {
-            if (elements.betBtn.disabled) return;
-            elements.betPopup.style.display = elements.betPopup.style.display === 'block' ? 'none' : 'block';
+            if (!elements.betBtn.disabled || !elements.raiseBtn.disabled) 
+                elements.betPopup.style.display = elements.betPopup.style.display === 'block' ? 'none' : 'block';
         }
 
         function bet(amount) {
             const myPlayer = gameState.players.find(p => p.id === myPlayerId);
-            if (myPlayer && amount > 0 && amount <= myPlayer.chips) {
-                socket.emit('bet', { amount });
-                elements.betPopup.style.display = 'none';
-                gameState.playerBets[myPlayerId] = (gameState.playerBets[myPlayerId] || 0) + amount;
-                gameState.currentBet = Math.max(gameState.currentBet, gameState.playerBets[myPlayerId]);
-            }
+            if (!myPlayer || amount <= 0 || amount > myPlayer.chips) return;
+            const minCall = Math.max(0, gameState.currentBet - (gameState.playerBets[myPlayerId] || 0));
+            const minRaise = gameState.currentBet + gameState.bigBlind;
+            const isRaise = gameState.currentBet > 0 && amount >= minRaise;
+            if (amount < minCall || (gameState.currentBet > 0 && amount < minRaise && amount !== myPlayer.chips)) return;
+            socket.emit('bet', { amount });
+            elements.betPopup.style.display = 'none';
         }
 
         function call() {
             const myPlayer = gameState.players.find(p => p.id === myPlayerId);
-            if (myPlayer && gameState.currentBet > (gameState.playerBets[myPlayerId] || 0)) {
-                const callAmount = Math.min(gameState.currentBet - (gameState.playerBets[myPlayerId] || 0), myPlayer.chips);
-                if (callAmount > 0) {
-                    socket.emit('bet', { amount: callAmount });
-                    gameState.playerBets[myPlayerId] = (gameState.playerBets[myPlayerId] || 0) + callAmount;
-                } else {
-                    socket.emit('check');
-                }
-            }
-        }
-
-        function betAllIn() {
-            const player = gameState.players.find(p => p.id === myPlayerId);
-            if (player) bet(player.chips);
+            if (!myPlayer) return;
+            const callAmount = Math.min(gameState.currentBet - (gameState.playerBets[myPlayerId] || 0), myPlayer.chips);
+            if (callAmount > 0) socket.emit('bet', { amount: callAmount });
         }
 
         function betCustom() {
@@ -565,95 +276,62 @@
 
         function check() { socket.emit('check'); }
         function fold() { socket.emit('fold'); }
-
-        function togglePastHands() {
-            elements.pastHandsMenu.style.display = elements.pastHandsMenu.style.display === 'block' ? 'none' : 'block';
-            updatePastHandsMenu();
-        }
-
-        function updatePastHandsMenu() {
-            elements.pastHandsMenu.innerHTML = '<h3>Past Hands</h3>';
-            gameState.pastHands.forEach((hand, index) => {
-                const entry = document.createElement('div');
-                entry.className = 'hand-entry';
-                entry.innerHTML = `
-                    <strong>Hand ${index + 1} (Winner: ${hand.winner}, Pot: ${hand.pot})</strong><br>
+        function toggleGameLog() { elements.gameLogMenu.style.display = elements.gameLogMenu.style.display === 'block' ? 'none' : 'block'; updateGameLogMenu(); }
+        function updateGameLogMenu() { 
+            elements.gameLogMenu.innerHTML = '<h3>Game Log</h3>' + gameState.pastHands.map((hand, i) => `
+                <div class="hand-entry">
+                    <strong>Hand ${i + 1} (Winner: ${hand.winner}, Pot: ${hand.pot})</strong><br>
                     Community: ${hand.communityCards.join(', ')}<br>
-                    Preflop: ${hand.bets.preflop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                    Flop: ${hand.bets.flop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                    Turn: ${hand.bets.turn.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                    River: ${hand.bets.river.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
-                    Players: ${hand.players.map(p => `${p.name} (${p.cards.join(', ')}, ${p.chips} chips)`).join('; ')}
-                `;
-                elements.pastHandsMenu.appendChild(entry);
-            });
+                    Players: ${hand.players.map(p => `${p.name} (${p.cards.join(', ')}) - ${p.handType}`).join('; ')}
+                </div>`).join(''); 
         }
-
         function configureGame() {
-            const smallBlind = parseInt(document.getElementById('smallBlind').value) || 5;
-            const bigBlind = parseInt(document.getElementById('bigBlind').value) || 10;
-            const minBuyIn = parseInt(document.getElementById('minBuyIn').value) || 10;
-            const maxBuyIn = parseInt(document.getElementById('maxBuyIn').value) || 1000;
-            socket.emit('configureGame', { smallBlind, bigBlind, minBuyIn, maxBuyIn });
+            if (!socket.connected) {
+                elements.errorMessage.textContent = 'Not connected to server. Please wait...';
+                return;
+            }
+            const config = {
+                smallBlind: parseInt(document.getElementById('smallBlind').value) || 5,
+                bigBlind: parseInt(document.getElementById('bigBlind').value) || 10,
+                minBuyIn: parseInt(document.getElementById('minBuyIn').value) || 10,
+                maxBuyIn: parseInt(document.getElementById('maxBuyIn').value) || 1000
+            };
+            socket.emit('configureGame', config);
+        }
+        function sendChatMessage() { 
+            const message = elements.chatInput.value.trim(); 
+            if (message && myName) { 
+                socket.emit('chatMessage', { name: myName, message }); 
+                elements.chatInput.value = ''; 
+            } 
         }
 
         async function toggleVoiceChat() {
-            try {
-                if (!localStream) {
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    elements.voiceToggle.textContent = '🔇';
-                    elements.voiceToggle.style.backgroundColor = '#4CAF50';
-                    elements.voiceToggle.title = 'Click to mute';
-
-                    const audioTrack = localStream.getAudioTracks()[0];
-                    const pc = new RTCPeerConnection(configuration);
-                    pc.onicecandidate = ({ candidate }) => {
-                        if (candidate) {
-                            console.log('Broadcasting ICE candidate');
-                            socket.emit('voiceSignal', { to: null, signal: candidate });
-                        }
-                    };
-                    pc.ontrack = (event) => {
-                        console.log('Received remote track');
-                        const audio = new Audio();
-                        audio.srcObject = event.streams[0];
-                        audio.autoplay = true;
-                        audio.volume = 0.5;
-                        document.body.appendChild(audio);
-                    };
-                    pc.oniceconnectionstatechange = () => {
-                        console.log('ICE state:', pc.iceConnectionState);
-                    };
-                    pc.addTrack(audioTrack, localStream);
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-                    socket.emit('voiceSignal', { to: null, signal: offer });
-                    peerConnections[myPlayerId] = pc;
-
-                    Object.values(peerConnections).forEach(existingPc => {
-                        if (existingPc !== pc && existingPc.signalingState !== 'closed') {
-                            existingPc.addTrack(audioTrack, localStream);
+            if (!voiceActive) {
+                try {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    gameState.players.forEach(p => {
+                        if (p.id !== myPlayerId) {
+                            const call = peer.call(p.id, mediaStream);
+                            call.on('stream', (remoteStream) => {
+                                const audio = new Audio();
+                                audio.srcObject = remoteStream;
+                                audio.play();
+                            });
+                            calls.push(call);
                         }
                     });
-                } else {
-                    localStream.getTracks().forEach(track => track.stop());
-                    localStream = null;
-                    elements.voiceToggle.textContent = '🎤';
-                    elements.voiceToggle.style.backgroundColor = '#1a73e8';
-                    elements.voiceToggle.title = 'Click to enable mic';
-                    Object.values(peerConnections).forEach(pc => pc.close());
-                    peerConnections = {};
+                    elements.voiceToggle.style.background = '#00ff00';
+                    voiceActive = true;
+                } catch (err) {
+                    console.error('Voice chat error:', err);
                 }
-            } catch (e) {
-                handleError('Voice Chat', e);
-            }
-        }
-
-        function sendChatMessage() {
-            const message = elements.chatInput.value.trim();
-            if (message && myName) {
-                socket.emit('chatMessage', { name: myName, message });
-                elements.chatInput.value = '';
+            } else {
+                mediaStream.getTracks().forEach(track => track.stop());
+                calls.forEach(call => call.close());
+                calls = [];
+                elements.voiceToggle.style.background = '#1a73e8';
+                voiceActive = false;
             }
         }
     </script>
