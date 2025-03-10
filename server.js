@@ -10,7 +10,7 @@ const io = new Server(server, {
         methods: ["GET", "POST"],
         credentials: true
     },
-    transports: ['websocket', 'polling'] // Explicitly allow both transports
+    transports: ['websocket'] // Force WebSocket only for now
 });
 
 app.use(express.static('public'));
@@ -126,6 +126,7 @@ io.on('connection', (socket) => {
     io.emit('update', gameState);
 
     socket.on('sitDown', ({ name, chips, seat }) => {
+        console.log(`Sit down attempt: ${name} at seat ${seat}`);
         if (gameState.seats[seat] === null && gameState.players.length < 8) {
             const player = { id: socket.id, name, chips, cards: [], seat };
             gameState.seats[seat] = player;
@@ -203,9 +204,13 @@ io.on('connection', (socket) => {
         }
         io.emit('update', gameState);
     });
+
+    socket.on('error', (error) => {
+        console.error(`Socket error: ${error.message}`);
+    });
 });
 
 shuffleDeck();
-server.listen(3000, '0.0.0.0', () => { // Bind to all interfaces
-    console.log('Server running on port 3000');
+server.listen(3000, '0.0.0.0', () => {
+    console.log('Server running on http://localhost:3000');
 });

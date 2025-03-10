@@ -6,7 +6,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        /* Previous styles unchanged, just listing key ones for brevity */
         body { display: flex; flex-direction: column; align-items: center; font-family: 'Montserrat', sans-serif; margin: 0; padding: 20px; background: #f0f2f5; min-height: 100vh; }
         #pokerSvg { width: 800px; height: 600px; }
         #controls { margin-top: 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: relative; }
@@ -55,7 +54,7 @@
     <script>
         try {
             const socket = io('http://localhost:3000', {
-                transports: ['websocket', 'polling'],
+                transports: ['websocket'], // Force WebSocket only for now
                 reconnection: true,
                 reconnectionAttempts: 10,
                 reconnectionDelay: 1000
@@ -84,7 +83,8 @@
 
             socket.on('connect', () => {
                 console.log('Connected to server with ID:', socket.id);
-                errorMessage.textContent = '';
+                errorMessage.textContent = 'Connected!';
+                setTimeout(() => errorMessage.textContent = '', 2000); // Clear after 2s
                 drawScene();
             });
 
@@ -102,12 +102,18 @@
             });
 
             socket.on('connect_error', (error) => {
-                errorMessage.textContent = 'Connection error: ' + error.message;
+                errorMessage.textContent = 'WebSocket connection error: ' + error.message;
                 console.error('Socket.IO connection error:', error);
             });
 
             socket.on('reconnect_attempt', (attempt) => {
                 console.log(`Reconnection attempt ${attempt}`);
+                errorMessage.textContent = `Reconnecting... (Attempt ${attempt})`;
+            });
+
+            socket.on('error', (error) => {
+                console.error('Socket error:', error);
+                errorMessage.textContent = 'Socket error: ' + error.message;
             });
 
             socket.on('voiceSignal', async (data) => {
