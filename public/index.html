@@ -52,7 +52,7 @@
     <button id="pastHandsBtn" onclick="togglePastHands()">Past Hands</button>
     <div id="pastHandsMenu"></div>
     <div id="voiceChat">
-        <button id="voiceToggle" onclick="toggleVoiceChat()">🎤</button>
+        <button id="voiceToggle" onclick="toggleVoiceChat()" title="Click to enable mic">🎤</button>
     </div>
     <div id="spectatorCount">
         <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 5C4 5 0 10 0 10s4 5 10 5 10-5 10-5-4-5-10-5zm0 8c-1.7 0-3-1.3-3-3s1.3-3 3-3 3 1.3 3 3-1.3 3-3 3z"/></svg>
@@ -60,135 +60,79 @@
     </div>
 
     <script>
-        try {
-            console.log('Attempting to connect to server at', new Date().toISOString());
-            const socketUrl = window.location.origin.replace('http', 'ws').replace('https', 'wss');
-            console.log('Connecting to Socket.IO at:', socketUrl);
-            const socket = io(socketUrl, {
-                transports: ['websocket'],
-                reconnection: true,
-                reconnectionAttempts: 10,
-                reconnectionDelay: 1000,
-                timeout: 20000
-            });
-            const svg = document.getElementById('pokerSvg');
-            const sitDownBtn = document.getElementById('sitDownBtn');
-            const betBtn = document.getElementById('betBtn');
-            const checkBtn = document.getElementById('checkBtn');
-            const foldBtn = document.getElementById('foldBtn');
-            const nextBtn = document.getElementById('nextBtn');
-            const betPopup = document.getElementById('betPopup');
-            const pastHandsMenu = document.getElementById('pastHandsMenu');
-            const errorMessage = document.getElementById('errorMessage');
-            const voiceToggle = document.getElementById('voiceToggle');
+        const CONFIG = {
+            MAX_PLAYERS: 8,
+            CARD_WIDTH: 60,
+            CARD_SPACING: 10,
+            TABLE_WIDTH: 800,
+            TABLE_HEIGHT: 600,
+            MIN_CHIPS: 10
+        };
 
-            let gameState = {
-                players: [], communityCards: [], gameStage: 'waiting', pot: 0, currentPlayerIndex: 0,
-                dealerIndex: 0, hasBetThisRound: new Set(), pastHands: [], currentHandBets: { preflop: [], flop: [], turn: [], river: [] },
-                spectators: 0, smallBlind: 5, bigBlind: 10
-            };
-            let myPlayerId = localStorage.getItem('myPlayerId') || null;
+        const socket = io(window.location.origin, {
+            transports: ['websocket'],
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            timeout: 20000
+        });
 
-            socket.on('connect', () => {
-                console.log('Successfully connected to server with ID:', socket.id, 'at', new Date().toISOString());
-                if (!myPlayerId || myPlayerId !== socket.id) {
-                    myPlayerId = socket.id;
-                    localStorage.setItem('myPlayerId', myPlayerId);
-                    console.log('Saved new player ID:', myPlayerId);
-                }
-                errorMessage.textContent = 'Connected!';
-                setTimeout(() => errorMessage.textContent = '', 2000);
-                socket.emit('rejoin', { playerId: myPlayerId }); // Request to rejoin with existing ID
-                drawScene();
-            });
+        const elements = {
+            svg: document.getElementById('pokerSvg'),
+            sitDownBtn: document.getElementById('sitDownBtn'),
+            betBtn: document.getElementById('betBtn'),
+            checkBtn: document.getElementById('checkBtn'),
+            foldBtn: document.getElementById('foldBtn'),
+            nextBtn: document.getElementById('nextBtn'),
+            betPopup: document.getElementById('betPopup'),
+            pastHandsMenu: document.getElementById('pastHandsMenu'),
+            errorMessage: document.getElementById('errorMessage'),
+            voiceToggle: document.getElementById('voiceToggle'),
+            spectatorNum: document.getElementById('spectatorNum')
+        };
 
-            socket.on('rejoin', ({ playerId }) => {
-                console.log(`Rejoin attempt with playerId: ${playerId}`);
-                const player = gameState.players.find(p => p.id === playerId);
-                if (player) {
-                    console.log(`Rejoined player ${player.name} at seat ${player.seat}`);
-                    socket.emit('rejoin', prepareGameStateForClient());
-                } else {
-                    console.log('No matching player found for rejoin');
-                }
-            });
+        let gameState = {
+            players: [], communityCards: [], gameStage: 'waiting', pot: 0, currentPlayerIndex: 0,
+            dealerIndex: 0, hasBetThisRound: new Set(), pastHands: [], currentHandBets: { preflop: [], flop: [], turn: [], river: [] },
+            spectators: 0, smallBlind: 5, bigBlind: 10, seats: Array(CONFIG.MAX_PLAYERS).fill(null)
+        };
+        let myPlayerId = localStorage.getItem('myPlayerId') || null;
+        let isSpectating = true;
+        let localStream = null;
+        let peerConnections = {};
+        const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-            socket.on('update', (state) => {
+        function handleError(type, error) {
+            const timestamp = new Date().toISOString();
+            console.error(`${type} error at ${timestamp}:`, error);
+            elements.errorMessage.textContent = `${type}: ${error.message}`;
+            setTimeout(() => elements.errorMessage.textContent = '', 3000);
+        }
+
+        const socketEvents = {
+            connect: () => {
+                myPlayerId = socket.id;
+                localStorage.setItem('myPlayerId', myPlayerId);
+                elements.errorMessage.textContent = 'Connected!';
+                setTimeout(() => elements.errorMessage.textContent = '', 2000);
+                socket.emit('rejoin', { playerId: myPlayerId });
+                debouncedDrawScene();
+            },
+            update: (state) => {
                 try {
-                    console.log('Received update from server at', new Date().toISOString(), ':', state);
-                    gameState = state;
-                    gameState.hasBetThisRound = new Set(state.hasBetThisRound || []);
-                    myPlayerId = socket.id;
-                    localStorage.setItem('myPlayerId', myPlayerId); // Update ID if changed
-                    document.getElementById('spectatorNum').textContent = gameState.spectators || 0;
-                    if (!gameState.isConfigured) {
-                        document.getElementById('configScreen').style.display = 'block';
-                        document.getElementById('pokerSvg').style.display = 'none';
-                        document.getElementById('controls').style.display = 'none';
-                    } else {
-                        document.getElementById('configScreen').style.display = 'none';
-                        document.getElementById('pokerSvg').style.display = 'block';
-                        document.getElementById('controls').style.display = 'block';
-                        drawScene();
-                    }
+                    gameState = { ...state, hasBetThisRound: new Set(state.hasBetThisRound || []) };
+                    elements.spectatorNum.textContent = gameState.spectators || 0;
+                    toggleGameDisplay(gameState.isConfigured);
+                    debouncedDrawScene();
                 } catch (e) {
-                    errorMessage.textContent = 'Update error: ' + e.message;
-                    console.error('Update error at', new Date().toISOString(), ':', e);
+                    handleError('Update', e);
                 }
-            });
-            let isSpectating = true;
-            let localStream = null;
-            let peerConnections = {};
-            const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-
-            socket.on('connect', () => {
-                console.log('Successfully connected to server with ID:', socket.id, 'at', new Date().toISOString());
-                errorMessage.textContent = 'Connected!';
-                setTimeout(() => errorMessage.textContent = '', 2000);
-                drawScene();
-            });
-
-            socket.on('update', (state) => {
-                try {
-                    console.log('Received update from server at', new Date().toISOString(), ':', state);
-                    gameState = state;
-                    gameState.hasBetThisRound = new Set(state.hasBetThisRound || []);
-                    myPlayerId = socket.id;
-                    document.getElementById('spectatorNum').textContent = gameState.spectators || 0;
-                    drawScene();
-                } catch (e) {
-                    errorMessage.textContent = 'Update error: ' + e.message;
-                    console.error('Update error at', new Date().toISOString(), ':', e);
-                }
-            });
-
-            socket.on('connect_error', (error) => {
-                console.error('Socket.IO connect_error at', new Date().toISOString(), ':', error);
-                errorMessage.textContent = 'WebSocket connection error: ' + error.message;
-            });
-
-            socket.on('reconnect_attempt', (attempt) => {
-                console.log(`Reconnection attempt ${attempt} at`, new Date().toISOString());
-                errorMessage.textContent = `Reconnecting... (Attempt ${attempt})`;
-            });
-
-            socket.on('reconnect_failed', () => {
-                console.error('Reconnection failed at', new Date().toISOString());
-                errorMessage.textContent = 'Failed to reconnect to server';
-            });
-
-            socket.on('disconnect', (reason) => {
-                console.log('Disconnected from server at', new Date().toISOString(), '- Reason:', reason);
-                errorMessage.textContent = 'Disconnected: ' + reason;
-            });
-
-            socket.on('error', (error) => {
-                console.error('Socket error at', new Date().toISOString(), ':', error);
-                errorMessage.textContent = 'Socket error: ' + error.message;
-            });
-
-            socket.on('voiceSignal', async (data) => {
-                const { from, signal } = data;
+            },
+            rejoin: (state) => {
+                gameState = { ...state, hasBetThisRound: new Set(state.hasBetThisRound || []) };
+                debouncedDrawScene();
+            },
+            voiceSignal: async ({ from, signal }) => {
                 if (!peerConnections[from]) {
                     peerConnections[from] = new RTCPeerConnection(configuration);
                     peerConnections[from].onicecandidate = ({ candidate }) => {
@@ -197,424 +141,342 @@
                     peerConnections[from].ontrack = (event) => {
                         const audio = new Audio();
                         audio.srcObject = event.streams[0];
-                        audio.play();
+                        audio.autoplay = true;
+                        audio.volume = 0.5;
                     };
-                    if (localStream) peerConnections[from].addStream(localStream);
+                    if (localStream) peerConnections[from].addTrack(localStream.getAudioTracks()[0], localStream);
                 }
-
-            socket.on('sitDown', ({ name, chips, seat }) => {
-                console.log(`Sit down attempt: ${name} at seat ${seat}, current players: ${gameState.players.length}`);
-                if (gameState.seats[seat] === null && gameState.players.length < 8) {
-                    const player = { id: socket.id, name, chips, cards: [], seat };
-                    gameState.seats[seat] = player;
-                    gameState.players = gameState.seats.filter(p => p !== null); // Rebuild players array
-                    gameState.spectators--;
-                    console.log(`Player ${name} seated at ${seat}, total players: ${gameState.players.length}`);
-                    if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
-                        console.log('Starting new hand with 2+ players');
-                        startNewHand();
-                    } else {
-                        io.emit('update', prepareGameStateForClient());
-                    }
-                } else {
-                    console.log(`Seat ${seat} is taken or table is full`);
-                    socket.emit('sitDownError', 'Seat taken or table full');
-                }
-            });
-
+                const pc = peerConnections[from];
                 if (signal.type === 'offer') {
-                    await peerConnections[from].setRemoteDescription(new RTCSessionDescription(signal));
-                    const answer = await peerConnections[from].createAnswer();
-                    await peerConnections[from].setLocalDescription(answer);
+                    await pc.setRemoteDescription(new RTCSessionDescription(signal));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
                     socket.emit('voiceSignal', { to: from, signal: answer });
                 } else if (signal.type === 'answer') {
-                    await peerConnections[from].setRemoteDescription(new RTCSessionDescription(signal));
+                    await pc.setRemoteDescription(new RTCSessionDescription(signal));
                 } else if (signal.candidate) {
-                    await peerConnections[from].addIceCandidate(new RTCIceCandidate(signal));
+                    await pc.addIceCandidate(new RTCIceCandidate(signal));
                 }
+            },
+            configError: (message) => handleError('Config', new Error(message)),
+            sitDownError: (message) => handleError('Sit Down', new Error(message))
+        };
+
+        Object.entries(socketEvents).forEach(([event, handler]) => socket.on(event, handler));
+
+        function toggleGameDisplay(isConfigured) {
+            document.getElementById('configScreen').style.display = isConfigured ? 'none' : 'block';
+            elements.svg.style.display = isConfigured ? 'block' : 'none';
+            elements.controls.style.display = isConfigured ? 'block' : 'none';
+        }
+
+        function drawScene() {
+            elements.svg.innerHTML = '';
+            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            defs.innerHTML = `
+                <filter id="dim"><feColorMatrix type="matrix" values="0.5 0 0 0 0  0 0.5 0 0 0  0 0 0.5 0 0  0 0 0 0.5 0"/></filter>
+                <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <radialGradient id="tableGradient"><stop offset="0%" style="stop-color: #2e7d32;" /><stop offset="100%" style="stop-color: #1b5e20;" /></radialGradient>
+            `;
+            elements.svg.appendChild(defs);
+
+            const table = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+            table.setAttribute('cx', '400');
+            table.setAttribute('cy', '300');
+            table.setAttribute('rx', '300');
+            table.setAttribute('ry', '200');
+            table.setAttribute('fill', 'url(#tableGradient)');
+            if (gameState.gameStage === 'showdown') table.setAttribute('filter', 'url(#dim)');
+            elements.svg.appendChild(table);
+
+            const totalWidth = gameState.communityCards.length * CONFIG.CARD_WIDTH + (gameState.communityCards.length - 1) * CONFIG.CARD_SPACING;
+            const startX = 400 - totalWidth / 2;
+            gameState.communityCards.forEach((card, i) => {
+                if (card) drawCard(card, startX + i * (CONFIG.CARD_WIDTH + CONFIG.CARD_SPACING), 270, gameState.gameStage === 'showdown');
             });
 
-            function drawScene() {
-                try {
-                    console.log('Drawing scene at', new Date().toISOString());
-                    svg.innerHTML = '';
-                    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-                    const dimFilter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-                    dimFilter.setAttribute('id', 'dim');
-                    dimFilter.innerHTML = '<feColorMatrix type="matrix" values="0.5 0 0 0 0  0 0.5 0 0 0  0 0 0.5 0 0  0 0 0 0.5 0"/>';
-                    defs.appendChild(dimFilter);
+            for (let i = 0; i < CONFIG.MAX_PLAYERS; i++) {
+                const angle = (i / CONFIG.MAX_PLAYERS) * 2 * Math.PI;
+                const x = 400 + 250 * Math.cos(angle);
+                const y = 300 + 150 * Math.sin(angle);
+                const player = gameState.players.find(p => p && p.seat === i);
 
-                    const glowFilter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-                    glowFilter.setAttribute('id', 'glow');
-                    glowFilter.innerHTML = `<feGaussianBlur stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>`;
-                    defs.appendChild(glowFilter);
-                    svg.appendChild(defs);
-
-                    const table = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-                    table.setAttribute('cx', '400');
-                    table.setAttribute('cy', '300');
-                    table.setAttribute('rx', '300');
-                    table.setAttribute('ry', '200');
-                    table.setAttribute('fill', 'url(#tableGradient)');
-                    if (gameState.gameStage === 'showdown') table.setAttribute('filter', 'url(#dim)');
-                    svg.appendChild(table);
-
-                    const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'radialGradient');
-                    gradient.setAttribute('id', 'tableGradient');
-                    gradient.innerHTML = `<stop offset="0%" style="stop-color: #2e7d32;" /><stop offset="100%" style="stop-color: #1b5e20;" />`;
-                    defs.appendChild(gradient);
-
-                    const cardWidth = 60;
-                    const cardSpacing = 10;
-                    const totalWidth = gameState.communityCards.length * cardWidth + (gameState.communityCards.length - 1) * cardSpacing;
-                    const startX = 400 - totalWidth / 2;
-                    gameState.communityCards.forEach((card, i) => {
-                        if (card) {
-                            drawCard(card, startX + i * (cardWidth + cardSpacing), 270, gameState.gameStage === 'showdown');
-                        } else {
-                            console.warn('Skipping undefined community card at index', i);
-                        }
-                    });
-
-                    for (let i = 0; i < 8; i++) {
-                        const angle = (i / 8) * 2 * Math.PI;
-                        const x = 400 + 250 * Math.cos(angle);
-                        const y = 300 + 150 * Math.sin(angle);
-                        const player = gameState.players.find(p => p && p.seat === i);
-
-                        if (!player) {
-                            const seat = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                            seat.setAttribute('cx', x);
-                            seat.setAttribute('cy', y);
-                            seat.setAttribute('r', '30');
-                            seat.setAttribute('fill', '#ccc');
-                            seat.setAttribute('class', 'open-seat');
-                            seat.onclick = () => sitDownAtSeat(i);
-                            svg.appendChild(seat);
-
-                            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                            text.setAttribute('x', x);
-                            text.setAttribute('y', y + 5);
-                            text.setAttribute('text-anchor', 'middle');
-                            text.textContent = 'Open';
-                            svg.appendChild(text);
-                            continue;
-                        }
-
-                        if (i === gameState.dealerIndex) {
-                            const dealer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                            dealer.setAttribute('cx', x);
-                            dealer.setAttribute('cy', y - 40);
-                            dealer.setAttribute('r', '10');
-                            dealer.setAttribute('fill', '#000');
-                            svg.appendChild(dealer);
-                            const dealerText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                            dealerText.setAttribute('x', x);
-                            dealerText.setAttribute('y', y - 36);
-                            dealerText.setAttribute('text-anchor', 'middle');
-                            dealerText.setAttribute('fill', '#fff');
-                            dealerText.setAttribute('font-size', '12');
-                            dealerText.textContent = 'D';
-                            svg.appendChild(dealerText);
-                        }
-
-                        const nameText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                        nameText.setAttribute('x', x);
-                        nameText.setAttribute('y', y + 120);
-                        nameText.setAttribute('text-anchor', 'middle');
-                        nameText.setAttribute('fill', '#000');
-                        nameText.setAttribute('font-size', '16');
-                        nameText.textContent = player.name;
-                        svg.appendChild(nameText);
-
-                        const chipBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                        chipBox.setAttribute('x', x - 40);
-                        chipBox.setAttribute('y', y + 130);
-                        chipBox.setAttribute('width', '80');
-                        chipBox.setAttribute('height', '25');
-                        chipBox.setAttribute('fill', '#fff');
-                        chipBox.setAttribute('stroke', '#333');
-                        chipBox.setAttribute('stroke-width', '1');
-                        chipBox.setAttribute('rx', '5');
-                        svg.appendChild(chipBox);
-
-                        const chipText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                        chipText.setAttribute('x', x);
-                        chipText.setAttribute('y', y + 148);
-                        chipText.setAttribute('text-anchor', 'middle');
-                        chipText.setAttribute('fill', '#000');
-                        chipText.setAttribute('font-size', '14');
-                        chipText.textContent = player.chips;
-                        svg.appendChild(chipText);
-
-                        if (player.cards && Array.isArray(player.cards)) {
-                            const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
-                            const isWinner = gameState.gameStage === 'showdown' && gameState.players[gameState.currentPlayerIndex]?.id === player.id;
-                            const yOffset = i === 0 ? 270 : y - 25;
-                            const card1 = showCards ? player.cards[0] : '?';
-                            const card2 = showCards ? player.cards[1] : '?';
-                            if (card1) {
-                                drawCard(card1, x - 45, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
-                            } else {
-                                console.warn('Skipping undefined card[0] for player', player.id, 'cards:', player.cards);
-                            }
-                            if (card2) {
-                                drawCard(card2, x + 15, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
-                            } else {
-                                console.warn('Skipping undefined card[1] for player', player.id, 'cards:', player.cards);
-                            }
-                        }
-
-                        const blindText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                        blindText.setAttribute('x', x);
-                        blindText.setAttribute('y', y + 100);
-                        blindText.setAttribute('text-anchor', 'middle');
-                        blindText.setAttribute('font-size', '12');
-                        const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-                        const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
-                        if (gameState.players[smallBlindIndex]?.seat === i) {
-                            const sbCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                            sbCircle.setAttribute('cx', x);
-                            sbCircle.setAttribute('cy', y + 100);
-                            sbCircle.setAttribute('r', '10');
-                            sbCircle.setAttribute('fill', '#000');
-                            svg.appendChild(sbCircle);
-                            const sbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                            sbText.setAttribute('x', x);
-                            sbText.setAttribute('y', y + 104);
-                            sbText.setAttribute('text-anchor', 'middle');
-                            sbText.setAttribute('fill', '#fff');
-                            sbText.setAttribute('font-size', '12');
-                            sbText.textContent = 'SB';
-                            svg.appendChild(sbText);
-                        } else if (gameState.players[bigBlindIndex]?.seat === i) {
-                            const bbCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                            bbCircle.setAttribute('cx', x);
-                            bbCircle.setAttribute('cy', y + 100);
-                            bbCircle.setAttribute('r', '10');
-                            bbCircle.setAttribute('fill', '#000');
-                            svg.appendChild(bbCircle);
-                            const bbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                            bbText.setAttribute('x', x);
-                            bbText.setAttribute('y', y + 104);
-                            bbText.setAttribute('text-anchor', 'middle');
-                            bbText.setAttribute('fill', '#fff');
-                            bbText.setAttribute('font-size', '12');
-                            bbText.textContent = 'BB';
-                            svg.appendChild(bbText);
-                        }
-                        svg.appendChild(blindText); // Keep this line but it’s now optional
-                    }
-
-                    const potText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    potText.setAttribute('x', '400');
-                    potText.setAttribute('y', '400');
-                    potText.setAttribute('text-anchor', 'middle');
-                    potText.setAttribute('fill', '#fff');
-                    potText.setAttribute('font-size', '20');
-                    potText.textContent = `Pot: ${gameState.pot}`;
-                    svg.appendChild(potText);
-
-                    const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === myPlayerId;
-                    const myPlayer = gameState.players.find(p => p && p.id === myPlayerId);
-                    betBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
-                    checkBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
-                    foldBtn.disabled = !isMyTurn || !myPlayer || gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown';
-                    nextBtn.disabled = !myPlayer || gameState.hasBetThisRound.size !== gameState.players.length || !isMyTurn;
-                    sitDownBtn.style.display = isSpectating && gameState.players.length < 8 ? 'block' : 'none';
-                } catch (e) {
-                    errorMessage.textContent = 'Draw error: ' + e.message;
-                    console.error('Draw error at', new Date().toISOString(), ':', e);
+                if (!player) {
+                    const seat = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    seat.setAttribute('cx', x);
+                    seat.setAttribute('cy', y);
+                    seat.setAttribute('r', '30');
+                    seat.setAttribute('fill', '#ccc');
+                    seat.setAttribute('class', 'open-seat');
+                    seat.onclick = () => sitDownAtSeat(i);
+                    elements.svg.appendChild(seat);
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', x);
+                    text.setAttribute('y', y + 5);
+                    text.setAttribute('text-anchor', 'middle');
+                    text.textContent = 'Open';
+                    elements.svg.appendChild(text);
+                    continue;
                 }
+
+                drawPlayerBox(player, x, y, i);
+                const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
+                const isWinner = gameState.gameStage === 'showdown' && gameState.players[gameState.currentPlayerIndex]?.id === player.id;
+                const yOffset = i === 0 ? 270 : y - 25;
+                if (player.cards?.[0]) drawCard(showCards ? player.cards[0] : '?', x - 45, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
+                if (player.cards?.[1]) drawCard(showCards ? player.cards[1] : '?', x + 15, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
             }
 
-            function drawCard(card, x, y, dim = false, highlight = false) {
-                if (!card || typeof card !== 'string') {
-                    console.warn('Invalid card value:', card);
-                    return;
-                }
-                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', x);
-                rect.setAttribute('y', y);
-                rect.setAttribute('width', '60');
-                rect.setAttribute('height', '80');
-                rect.setAttribute('fill', '#fff');
-                rect.setAttribute('stroke', '#333');
-                rect.setAttribute('stroke-width', '2');
-                rect.setAttribute('rx', '5');
-                if (dim) rect.setAttribute('filter', 'url(#dim)');
-                if (highlight) {
-                    rect.setAttribute('filter', 'url(#glow)');
-                    rect.setAttribute('stroke', '#ffd700');
-                    rect.setAttribute('stroke-width', '3');
-                }
-                svg.appendChild(rect);
+            const potText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            potText.setAttribute('x', '400');
+            potText.setAttribute('y', '400');
+            potText.setAttribute('text-anchor', 'middle');
+            potText.setAttribute('fill', '#fff');
+            potText.setAttribute('font-size', '20');
+            potText.textContent = `Pot: ${gameState.pot}`;
+            elements.svg.appendChild(potText);
 
-                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                text.setAttribute('x', x + 30);
-                text.setAttribute('y', y + 45);
-                text.setAttribute('text-anchor', 'middle');
-                text.setAttribute('fill', card.includes('♥') || card.includes('♦') ? '#d32f2f' : '#000');
-                text.setAttribute('font-size', '20');
-                text.textContent = card;
-                if (dim) text.setAttribute('filter', 'url(#dim)');
-                svg.appendChild(text);
+            updateButtonStates();
+        }
+
+        function drawPlayerBox(player, x, y, i) {
+            const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === player.id;
+            const isDealer = i === gameState.dealerIndex;
+            const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
+            const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
+
+            const playerBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            playerBox.setAttribute('x', x - 70);
+            playerBox.setAttribute('y', y + 80);
+            playerBox.setAttribute('width', '140');
+            playerBox.setAttribute('height', '70');
+            playerBox.setAttribute('fill', '#ffffff');
+            playerBox.setAttribute('stroke', isMyTurn ? '#ffd700' : '#333');
+            playerBox.setAttribute('stroke-width', isMyTurn ? '3' : '1');
+            playerBox.setAttribute('rx', '10');
+            playerBox.setAttribute('filter', 'url(#glow)');
+            elements.svg.appendChild(playerBox);
+
+            const nameText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            nameText.setAttribute('x', x);
+            nameText.setAttribute('y', y + 100);
+            nameText.setAttribute('text-anchor', 'middle');
+            nameText.setAttribute('fill', '#000');
+            nameText.setAttribute('font-size', '16');
+            nameText.setAttribute('font-weight', 'bold');
+            nameText.textContent = player.name;
+            elements.svg.appendChild(nameText);
+
+            const chipBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            chipBox.setAttribute('x', x - 50);
+            chipBox.setAttribute('y', y + 110);
+            chipBox.setAttribute('width', '100');
+            chipBox.setAttribute('height', '25');
+            chipBox.setAttribute('fill', '#ffd700');
+            chipBox.setAttribute('rx', '5');
+            elements.svg.appendChild(chipBox);
+
+            const chipText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            chipText.setAttribute('x', x);
+            chipText.setAttribute('y', y + 128);
+            chipText.setAttribute('text-anchor', 'middle');
+            chipText.setAttribute('fill', '#000');
+            chipText.setAttribute('font-size', '14');
+            chipText.textContent = `$${player.chips}`;
+            elements.svg.appendChild(chipText);
+
+            if (isDealer) {
+                const dealerChip = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                dealerChip.setAttribute('cx', x + 60);
+                dealerChip.setAttribute('cy', y + 90);
+                dealerChip.setAttribute('r', '10');
+                dealerChip.setAttribute('fill', '#000');
+                elements.svg.appendChild(dealerChip);
+                const dealerText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                dealerText.setAttribute('x', x + 60);
+                dealerText.setAttribute('y', y + 95);
+                dealerText.setAttribute('text-anchor', 'middle');
+                dealerText.setAttribute('fill', '#fff');
+                dealerText.setAttribute('font-size', '12');
+                dealerText.textContent = 'D';
+                elements.svg.appendChild(dealerText);
             }
 
-            function sitDown() { sitDownAtSeat(0); }
-            function sitDownAtSeat(seatIndex) {
-                if (!isSpectating) return;
-                const name = prompt("Enter your name:", "Player");
-                if (!name) return;
-                const chips = parseInt(prompt("Enter your starting chips (min 10):", "100")) || 100;
-                socket.emit('sitDown', { name, chips: Math.max(10, chips), seat: seatIndex });
-                isSpectating = false;
+            if (gameState.players[smallBlindIndex]?.seat === i) {
+                const sbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                sbText.setAttribute('x', x - 60);
+                sbText.setAttribute('y', y + 95);
+                sbText.setAttribute('text-anchor', 'middle');
+                sbText.setAttribute('fill', '#000');
+                sbText.setAttribute('font-size', '12');
+                sbText.textContent = 'SB';
+                elements.svg.appendChild(sbText);
+            } else if (gameState.players[bigBlindIndex]?.seat === i) {
+                const bbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                bbText.setAttribute('x', x - 60);
+                bbText.setAttribute('y', y + 95);
+                bbText.setAttribute('text-anchor', 'middle');
+                bbText.setAttribute('fill', '#000');
+                bbText.setAttribute('font-size', '12');
+                bbText.textContent = 'BB';
+                elements.svg.appendChild(bbText);
             }
+        }
 
-            function toggleBetOptions() {
-                if (betBtn.disabled) return;
-                betPopup.style.display = betPopup.style.display === 'block' ? 'none' : 'block';
+        function drawCard(card, x, y, dim = false, highlight = false) {
+            if (!card) return;
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x);
+            rect.setAttribute('y', y);
+            rect.setAttribute('width', CONFIG.CARD_WIDTH);
+            rect.setAttribute('height', '80');
+            rect.setAttribute('fill', '#fff');
+            rect.setAttribute('stroke', highlight ? '#ffd700' : '#333');
+            rect.setAttribute('stroke-width', highlight ? '3' : '2');
+            rect.setAttribute('rx', '5');
+            if (dim) rect.setAttribute('filter', 'url(#dim)');
+            if (highlight) rect.setAttribute('filter', 'url(#glow)');
+            elements.svg.appendChild(rect);
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', x + CONFIG.CARD_WIDTH / 2);
+            text.setAttribute('y', y + 45);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('fill', card.includes('♥') || card.includes('♦') ? '#d32f2f' : '#000');
+            text.setAttribute('font-size', '20');
+            text.textContent = card;
+            if (dim) text.setAttribute('filter', 'url(#dim)');
+            elements.svg.appendChild(text);
+        }
+
+        function updateButtonStates() {
+            const isMyTurn = gameState.players[gameState.currentPlayerIndex]?.id === myPlayerId;
+            const myPlayer = gameState.players.find(p => p && p.id === myPlayerId);
+            const isActiveGame = gameState.gameStage !== 'waiting' && gameState.gameStage !== 'showdown';
+
+            elements.betBtn.disabled = !isMyTurn || !myPlayer || !isActiveGame;
+            elements.checkBtn.disabled = !isMyTurn || !myPlayer || !isActiveGame;
+            elements.foldBtn.disabled = !isMyTurn || !myPlayer || !isActiveGame;
+            elements.nextBtn.disabled = !myPlayer || gameState.hasBetThisRound.size !== gameState.players.length || !isMyTurn;
+            elements.sitDownBtn.style.display = isSpectating && gameState.players.length < CONFIG.MAX_PLAYERS ? 'block' : 'none';
+        }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function (...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func(...args), wait);
+            };
+        }
+        const debouncedDrawScene = debounce(drawScene, 100);
+
+        function sitDown() { sitDownAtSeat(0); }
+        function sitDownAtSeat(seatIndex) {
+            if (!isSpectating) return;
+            const name = prompt("Enter your name:", "Player") || "Player";
+            const chips = Math.max(CONFIG.MIN_CHIPS, parseInt(prompt("Enter your starting chips (min 10):", "100")) || 100);
+            socket.emit('sitDown', { name, chips, seat: seatIndex });
+            isSpectating = false;
+        }
+
+        function toggleBetOptions() {
+            if (elements.betBtn.disabled) return;
+            elements.betPopup.style.display = elements.betPopup.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function bet(amount) {
+            const myPlayer = gameState.players.find(p => p.id === myPlayerId);
+            if (myPlayer && amount > 0 && amount <= myPlayer.chips) {
+                socket.emit('bet', { amount });
+                elements.betPopup.style.display = 'none';
             }
+        }
 
-            function bet(amount) {
-                const myPlayer = gameState.players.find(p => p.id === myPlayerId);
-                if (myPlayer && amount <= myPlayer.chips) {
-                    socket.emit('bet', amount);
-                    betPopup.style.display = 'none';
-                }
-            }
+        function betAllIn() {
+            const player = gameState.players.find(p => p.id === myPlayerId);
+            if (player) bet(player.chips);
+        }
 
-            function betAllIn() {
-                const player = gameState.players.find(p => p.id === myPlayerId);
-                if (player) bet(player.chips);
-            }
+        function betCustom() {
+            const amount = parseInt(document.getElementById('customBet').value);
+            if (!isNaN(amount)) bet(amount);
+        }
 
-            function betCustom() {
-                const amount = parseInt(document.getElementById('customBet').value);
-                if (!isNaN(amount) && amount > 0) bet(amount);
-            }
+        function check() { socket.emit('check'); }
+        function fold() { socket.emit('fold'); }
+        function advanceGame() { socket.emit('advance'); }
 
-            function check() { socket.emit('check'); }
-            function fold() { socket.emit('fold'); }
-            function advanceGame() {
-                gameState.dealerIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-                socket.emit('advance');
-            }
+        function togglePastHands() {
+            elements.pastHandsMenu.style.display = elements.pastHandsMenu.style.display === 'block' ? 'none' : 'block';
+            updatePastHandsMenu();
+        }
 
-            function togglePastHands() {
-                pastHandsMenu.style.display = pastHandsMenu.style.display === 'block' ? 'none' : 'block';
-                updatePastHandsMenu();
-            }
-
-            function updatePastHandsMenu() {
-                pastHandsMenu.innerHTML = '<h3>Past Hands</h3>';
-                gameState.pastHands.forEach((hand, index) => {
-                    const entry = document.createElement('div');
-                    entry.className = 'hand-entry';
-                    const preflopBets = hand.bets.preflop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
-                    const flopBets = hand.bets.flop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
-                    const turnBets = hand.bets.turn.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
-                    const riverBets = hand.bets.river.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None';
-                    const playersInfo = hand.players.map(p => `${p.name} (${p.cards.join(', ')}, ${p.chips} chips)`).join('; ');
-                    entry.innerHTML = `
-                        <strong>Hand ${index + 1} (Winner: ${hand.winner}, Pot: ${hand.pot})</strong><br>
-                        Community: ${hand.communityCards.join(', ')}<br>
-                        Preflop: ${preflopBets}<br>
-                        Flop: ${flopBets}<br>
-                        Turn: ${turnBets}<br>
-                        River: ${riverBets}<br>
-                        Players: ${playersInfo}
-                    `;
-                    pastHandsMenu.appendChild(entry);
-                });
-            }
-
-            function configureGame() {
-                const smallBlind = parseInt(document.getElementById('smallBlind').value) || 5;
-                const bigBlind = parseInt(document.getElementById('bigBlind').value) || 10;
-                const minBuyIn = parseInt(document.getElementById('minBuyIn').value) || 10;
-                const maxBuyIn = parseInt(document.getElementById('maxBuyIn').value) || 1000;
-                socket.emit('configureGame', { smallBlind, bigBlind, minBuyIn, maxBuyIn });
-            }
-
-            socket.on('configError', (message) => {
-                errorMessage.textContent = message;
-                setTimeout(() => errorMessage.textContent = '', 2000);
-                console.error('Config error:', message);
+        function updatePastHandsMenu() {
+            elements.pastHandsMenu.innerHTML = '<h3>Past Hands</h3>';
+            gameState.pastHands.forEach((hand, index) => {
+                const entry = document.createElement('div');
+                entry.className = 'hand-entry';
+                entry.innerHTML = `
+                    <strong>Hand ${index + 1} (Winner: ${hand.winner}, Pot: ${hand.pot})</strong><br>
+                    Community: ${hand.communityCards.join(', ')}<br>
+                    Preflop: ${hand.bets.preflop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                    Flop: ${hand.bets.flop.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                    Turn: ${hand.bets.turn.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                    River: ${hand.bets.river.map(b => `${b.player}: ${b.amount}`).join(', ') || 'None'}<br>
+                    Players: ${hand.players.map(p => `${p.name} (${p.cards.join(', ')}, ${p.chips} chips)`).join('; ')}
+                `;
+                elements.pastHandsMenu.appendChild(entry);
             });
+        }
 
-            socket.on('update', (state) => {
-                try {
-                    console.log('Received update from server at', new Date().toISOString(), ':', state);
-                    gameState = state;
-                    gameState.hasBetThisRound = new Set(state.hasBetThisRound || []);
-                    myPlayerId = socket.id;
-                    document.getElementById('spectatorNum').textContent = gameState.spectators || 0;
-                    if (!gameState.isConfigured) {
-                        document.getElementById('configScreen').style.display = 'block';
-                        document.getElementById('pokerSvg').style.display = 'none';
-                        document.getElementById('controls').style.display = 'none';
-                    } else {
-                        document.getElementById('configScreen').style.display = 'none';
-                        document.getElementById('pokerSvg').style.display = 'block';
-                        document.getElementById('controls').style.display = 'block';
-                        drawScene();
-                    }
-                } catch (e) {
-                    errorMessage.textContent = 'Update error: ' + e.message;
-                    console.error('Update error at', new Date().toISOString(), ':', e);
-                }
-            });
+        function configureGame() {
+            const smallBlind = parseInt(document.getElementById('smallBlind').value) || 5;
+            const bigBlind = parseInt(document.getElementById('bigBlind').value) || 10;
+            const minBuyIn = parseInt(document.getElementById('minBuyIn').value) || 10;
+            const maxBuyIn = parseInt(document.getElementById('maxBuyIn').value) || 1000;
+            socket.emit('configureGame', { smallBlind, bigBlind, minBuyIn, maxBuyIn });
+        }
 
-            async function toggleVoiceChat() {
+        async function toggleVoiceChat() {
+            try {
                 if (!localStream) {
-                    try {
-                        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        voiceToggle.style.background = '#4CAF50';
-                        const audioTrack = localStream.getAudioTracks()[0];
-                        Object.values(peerConnections).forEach(pc => {
-                            pc.addTrack(audioTrack, localStream);
-                        });
-                        const pc = new RTCPeerConnection(configuration);
-                        pc.onicecandidate = ({ candidate }) => {
-                            if (candidate) socket.emit('voiceSignal', { to: null, signal: candidate });
-                        };
-                        pc.ontrack = (event) => {
-                            const audio = new Audio();
-                            audio.srcObject = event.streams[0];
-                            audio.play().catch(e => console.error('Audio play failed:', e));
-                        };
-                        pc.addTrack(audioTrack, localStream);
-                        const offer = await pc.createOffer();
-                        await pc.setLocalDescription(offer);
-                        socket.emit('voiceSignal', { to: null, signal: offer });
-                        peerConnections[myPlayerId] = pc;
-                        console.log('Voice chat initialized with local stream:', localStream);
-                    } catch (e) {
-                        errorMessage.textContent = 'Voice chat error: ' + (e.message || e);
-                        console.error('Voice chat error at', new Date().toISOString(), ':', e);
-                    }
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    elements.voiceToggle.textContent = '🔇';
+                    elements.voiceToggle.style.backgroundColor = '#4CAF50';
+                    elements.voiceToggle.title = 'Click to mute';
+                    
+                    const audioTrack = localStream.getAudioTracks()[0];
+                    const pc = new RTCPeerConnection(configuration);
+                    pc.onicecandidate = ({ candidate }) => {
+                        if (candidate) socket.emit('voiceSignal', { to: null, signal: candidate });
+                    };
+                    pc.ontrack = (event) => {
+                        const audio = new Audio();
+                        audio.srcObject = event.streams[0];
+                        audio.autoplay = true;
+                        audio.volume = 0.5;
+                    };
+                    pc.addTrack(audioTrack, localStream);
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    socket.emit('voiceSignal', { to: null, signal: offer });
+                    peerConnections[myPlayerId] = pc;
+                    
+                    Object.values(peerConnections).forEach(pc => {
+                        if (pc !== peerConnections[myPlayerId]) pc.addTrack(audioTrack, localStream);
+                    });
                 } else {
                     localStream.getTracks().forEach(track => track.stop());
                     localStream = null;
-                    voiceToggle.style.background = '#1a73e8';
+                    elements.voiceToggle.textContent = '🎤';
+                    elements.voiceToggle.style.backgroundColor = '#1a73e8';
+                    elements.voiceToggle.title = 'Click to enable mic';
                     Object.values(peerConnections).forEach(pc => pc.close());
                     peerConnections = {};
-                    console.log('Voice chat stopped');
                 }
+            } catch (e) {
+                handleError('Voice Chat', e);
             }
-
-            socket.on('connect', () => {
-                if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
-                    const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-                    const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
-                    socket.emit('bet', { amount: gameState.smallBlind, playerIndex: smallBlindIndex, auto: true });
-                    socket.emit('bet', { amount: gameState.bigBlind, playerIndex: bigBlindIndex, auto: true });
-                }
-            });
-        } catch (e) {
-            document.getElementById('errorMessage').textContent = 'Initialization error: ' + e.message;
-            console.error('Initialization error at', new Date().toISOString(), ':', e);
         }
     </script>
 </body>

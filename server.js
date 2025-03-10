@@ -5,17 +5,22 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-        credentials: true
-    },
+    cors: { origin: "*", methods: ["GET", "POST"], credentials: true },
     transports: ['websocket'],
     pingTimeout: 60000,
     pingInterval: 25000
 });
 
 app.use(express.static('public'));
+
+const CONFIG = {
+    MAX_PLAYERS: 8,
+    MIN_CHIPS: 10,
+    DEFAULT_SMALL_BLIND: 5,
+    DEFAULT_BIG_BLIND: 10,
+    DEFAULT_MIN_BUYIN: 10,
+    DEFAULT_MAX_BUYIN: 1000
+};
 
 const gameState = {
     players: [],
@@ -28,194 +33,197 @@ const gameState = {
     pastHands: [],
     currentHandBets: { preflop: [], flop: [], turn: [], river: [] },
     spectators: 0,
-    smallBlind: 5,
-    bigBlind: 10,
-    minBuyIn: 10,
-    maxBuyIn: 1000,
+    smallBlind: CONFIG.DEFAULT_SMALL_BLIND,
+    bigBlind: CONFIG.DEFAULT_BIG_BLIND,
+    minBuyIn: CONFIG.DEFAULT_MIN_BUYIN,
+    maxBuyIn: CONFIG.DEFAULT_MAX_BUYIN,
     deck: [],
-    seats: Array(8).fill(null),
+    seats: Array(CONFIG.MAX_PLAYERS).fill(null),
     isConfigured: false
 };
 
 function shuffleDeck() {
     const suits = ['♥', '♦', '♣', '♠'];
     const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-    gameState.deck = [];
-    for (let suit of suits) {
-        for (let rank of ranks) {
-            gameState.deck.push(rank + suit);
-        }
-    }
+    gameState.deck = suits.flatMap(suit => ranks.map(rank => rank + suit));
     for (let i = gameState.deck.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [gameState.deck[i], gameState.deck[j]] = [gameState.deck[j], gameState.deck[i]];
     }
-    console.log('Deck shuffled with', gameState.deck.length, 'cards:', gameState.deck);
+    console.log('Deck shuffled:', gameState.deck.length, 'cards');
 }
 
 function dealCards() {
-    if (gameState.deck.length < gameState.players.length * 2 + 5) {
-        console.log('Deck too small, reshuffling. Current deck:', gameState.deck);
-        shuffleDeck();
-    }
+    if (gameState.deck.length < gameState.players.length * 2 + 5) shuffleDeck();
+    
     gameState.players.forEach(player => {
-        const card1 = gameState.deck.pop();
-        const card2 = gameState.deck.pop();
-        if (!card1 || !card2) {
-            console.error('Failed to deal cards to player', player.id, '- Deck:', gameState.deck);
+        player.cards = [gameState.deck.pop(), gameState.deck.pop()].filter(Boolean);
+        if (player.cards.length < 2) {
+            console.error('Insufficient cards for', player.id);
             shuffleDeck();
-            player.cards = [gameState.deck.pop() || 'A♥', gameState.deck.pop() || 'K♦'];
-        } else {
-            player.cards = [card1, card2];
+            player.cards = [gameState.deck.pop(), gameState.deck.pop()];
         }
-        console.log(`Dealt cards to player ${player.id}:`, player.cards);
+        console.log(`Dealt to ${player.id}:`, player.cards);
     });
     gameState.gameStage = 'preflop';
-    console.log('After dealing, deck has', gameState.deck.length, 'cards:', gameState.deck);
 }
 
 function advanceStage() {
     gameState.hasBetThisRound.clear();
-    switch (gameState.gameStage) {
-        case 'preflop':
-            gameState.communityCards = [
-                gameState.deck.pop() || 'A♠',
-                gameState.deck.pop() || 'K♠',
-                gameState.deck.pop() || 'Q♠'
-            ];
+    const stages = {
+        'preflop': () => {
+            gameState.communityCards = Array(3).fill().map(() => gameState.deck.pop() || 'A♠');
             gameState.gameStage = 'flop';
-            break;
-        case 'flop':
+        },
+        'flop': () => {
             gameState.communityCards.push(gameState.deck.pop() || 'J♠');
             gameState.gameStage = 'turn';
-            break;
-        case 'turn':
+        },
+        'turn': () => {
             gameState.communityCards.push(gameState.deck.pop() || '10♠');
             gameState.gameStage = 'river';
-            break;
-        case 'river':
+        },
+        'river': () => {
             determineWinner();
             gameState.gameStage = 'showdown';
-            break;
-        case 'showdown':
-            startNewHand();
-            break;
-    }
-    console.log('Advanced to stage', gameState.gameStage, 'with community cards:', gameState.communityCards);
+        },
+        'showdown': startNewHand
+    };
+    
+    stages[gameState.gameStage]?.();
+    console.log('Stage:', gameState.gameStage, 'Community:', gameState.communityCards);
 }
 
 function determineWinner() {
+    if (gameState.players.length === 0) return;
     const winnerIndex = Math.floor(Math.random() * gameState.players.length);
-    gameState.players[winnerIndex].chips += gameState.pot;
+    const winner = gameState.players[winnerIndex];
+    winner.chips += gameState.pot;
+    
     gameState.pastHands.push({
-        winner: gameState.players[winnerIndex].name,
+        winner: winner.name,
         pot: gameState.pot,
         communityCards: [...gameState.communityCards],
         bets: { ...gameState.currentHandBets },
         players: gameState.players.map(p => ({ name: p.name, cards: [...p.cards], chips: p.chips }))
     });
+    
     gameState.pot = 0;
     gameState.currentPlayerIndex = winnerIndex;
 }
 
 function startNewHand() {
+    if (gameState.players.length < 2) {
+        gameState.gameStage = 'waiting';
+        return;
+    }
+    
     gameState.communityCards = [];
     gameState.currentHandBets = { preflop: [], flop: [], turn: [], river: [] };
     gameState.hasBetThisRound.clear();
     gameState.dealerIndex = (gameState.dealerIndex + 1) % gameState.players.length;
-    gameState.currentPlayerIndex = (gameState.dealerIndex + 1) % gameState.players.length;
+    gameState.currentPlayerIndex = (gameState.dealerIndex + 3) % gameState.players.length; // Start after big blind
     
     const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
     const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
-    gameState.players[smallBlindIndex].chips -= gameState.smallBlind;
-    gameState.players[bigBlindIndex].chips -= gameState.bigBlind;
-    gameState.pot += gameState.smallBlind + gameState.bigBlind;
-    gameState.currentHandBets.preflop.push(
-        { player: gameState.players[smallBlindIndex].name, amount: gameState.smallBlind },
-        { player: gameState.players[bigBlindIndex].name, amount: gameState.bigBlind }
-    );
-    gameState.hasBetThisRound.add(gameState.players[smallBlindIndex].id);
-    gameState.hasBetThisRound.add(gameState.players[bigBlindIndex].id);
+    
+    applyBlind(smallBlindIndex, gameState.smallBlind);
+    applyBlind(bigBlindIndex, gameState.bigBlind);
     
     dealCards();
-    io.emit('update', prepareGameStateForClient());
+    broadcastUpdate();
+}
+
+function applyBlind(playerIndex, amount) {
+    const player = gameState.players[playerIndex];
+    if (!player || player.chips < amount) return;
+    
+    player.chips -= amount;
+    gameState.pot += amount;
+    gameState.currentHandBets.preflop.push({ player: player.name, amount });
+    gameState.hasBetThisRound.add(player.id);
 }
 
 function prepareGameStateForClient() {
-    console.log('Sending game state to client:', { ...gameState, hasBetThisRound: Array.from(gameState.hasBetThisRound) });
     return {
         ...gameState,
-        hasBetThisRound: Array.from(gameState.hasBetThisRound)
+        hasBetThisRound: Array.from(gameState.hasBetThisRound),
+        deck: undefined // Don't send full deck to clients
     };
 }
 
+function broadcastUpdate() {
+    const state = prepareGameStateForClient();
+    io.emit('update', state);
+    console.log('Broadcast state:', { stage: state.gameStage, players: state.players.length, pot: state.pot });
+}
+
 io.on('connection', (socket) => {
-    console.log(`New connection from ${socket.id} at ${new Date().toISOString()}`);
+    console.log(`Connected: ${socket.id}`);
     gameState.spectators++;
-    io.emit('update', prepareGameStateForClient());
+    broadcastUpdate();
 
     socket.on('configureGame', ({ smallBlind, bigBlind, minBuyIn, maxBuyIn }) => {
-        if (!gameState.isConfigured && gameState.players.length === 0) {
-            gameState.smallBlind = Math.max(1, smallBlind);
-            gameState.bigBlind = Math.max(gameState.smallBlind * 2, bigBlind);
-            gameState.minBuyIn = Math.max(gameState.bigBlind, minBuyIn);
-            gameState.maxBuyIn = Math.max(gameState.minBuyIn, maxBuyIn);
-            gameState.isConfigured = true;
-            console.log('Game configured:', { smallBlind: gameState.smallBlind, bigBlind: gameState.bigBlind, minBuyIn: gameState.minBuyIn, maxBuyIn: gameState.maxBuyIn });
-            io.emit('update', prepareGameStateForClient());
-        } else {
-            socket.emit('configError', 'Game already configured or players present');
+        if (gameState.isConfigured || gameState.players.length > 0) {
+            return socket.emit('configError', 'Game already configured or in progress');
         }
+        
+        gameState.smallBlind = Math.max(1, smallBlind);
+        gameState.bigBlind = Math.max(gameState.smallBlind * 2, bigBlind);
+        gameState.minBuyIn = Math.max(gameState.bigBlind, minBuyIn);
+        gameState.maxBuyIn = Math.max(gameState.minBuyIn, maxBuyIn);
+        gameState.isConfigured = true;
+        broadcastUpdate();
     });
 
     socket.on('rejoin', ({ playerId }) => {
-        console.log(`Rejoin attempt with playerId: ${playerId}`);
         const player = gameState.players.find(p => p.id === playerId);
         if (player) {
-            console.log(`Rejoined player ${player.name} at seat ${player.seat}`);
+            player.id = socket.id; // Update socket ID
             socket.emit('rejoin', prepareGameStateForClient());
-        } else {
-            console.log('No matching player found for rejoin');
         }
     });
 
     socket.on('sitDown', ({ name, chips, seat }) => {
-        console.log(`Sit down attempt: ${name} at seat ${seat}, current players: ${gameState.players.length}`);
-        if (!gameState.isConfigured) {
-            socket.emit('sitDownError', 'Game not configured yet');
-            return;
+        if (!gameState.isConfigured || 
+            gameState.seats[seat] !== null || 
+            gameState.players.length >= CONFIG.MAX_PLAYERS || 
+            chips < gameState.minBuyIn || 
+            chips > gameState.maxBuyIn) {
+            return socket.emit('sitDownError', 'Invalid sit-down conditions');
         }
-        if (gameState.seats[seat] === null && gameState.players.length < 8 && chips >= gameState.minBuyIn && chips <= gameState.maxBuyIn) {
-            const player = { id: socket.id, name, chips, cards: [], seat };
-            gameState.seats[seat] = player;
-            gameState.players = gameState.seats.filter(p => p !== null);
-            gameState.spectators--;
-            console.log(`Player ${name} seated at ${seat}, total players: ${gameState.players.length}`);
-            if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
-                console.log('Starting new hand with 2+ players');
-                startNewHand();
-            } else {
-                io.emit('update', prepareGameStateForClient());
-            }
+        
+        const player = { id: socket.id, name, chips, cards: [], seat };
+        gameState.seats[seat] = player;
+        gameState.players = gameState.seats.filter(Boolean);
+        gameState.spectators--;
+        
+        if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
+            startNewHand();
         } else {
-            console.log(`Seat ${seat} is taken, table full, or invalid buy-in (${chips})`);
-            socket.emit('sitDownError', 'Seat taken, table full, or invalid buy-in');
+            broadcastUpdate();
         }
     });
 
     socket.on('bet', (data) => {
-        const amount = data.amount || (data.auto ? (data.playerIndex === (gameState.dealerIndex + 1) % gameState.players.length ? gameState.smallBlind : gameState.bigBlind) : 0);
-        const playerIndex = data.playerIndex !== undefined ? data.playerIndex : gameState.players.findIndex(p => p.id === socket.id);
+        const playerIndex = data.playerIndex ?? gameState.players.findIndex(p => p.id === socket.id);
         const player = gameState.players[playerIndex];
-        if (!player || gameState.hasBetThisRound.has(player.id) || amount > player.chips) return;
+        if (!player || gameState.hasBetThisRound.has(player.id)) return;
+        
+        const amount = data.auto 
+            ? (playerIndex === (gameState.dealerIndex + 1) % gameState.players.length 
+                ? gameState.smallBlind 
+                : gameState.bigBlind)
+            : Math.min(data.amount, player.chips);
+            
+        if (amount <= 0 || amount > player.chips) return;
         
         player.chips -= amount;
         gameState.pot += amount;
         gameState.hasBetThisRound.add(player.id);
         gameState.currentHandBets[gameState.gameStage].push({ player: player.name, amount });
-        
         gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-        io.emit('update', prepareGameStateForClient());
+        broadcastUpdate();
     });
 
     socket.on('check', () => {
@@ -224,7 +232,7 @@ io.on('connection', (socket) => {
         
         gameState.hasBetThisRound.add(player.id);
         gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-        io.emit('update', prepareGameStateForClient());
+        broadcastUpdate();
     });
 
     socket.on('fold', () => {
@@ -233,45 +241,41 @@ io.on('connection', (socket) => {
         
         gameState.seats[gameState.players[playerIndex].seat] = null;
         gameState.players.splice(playerIndex, 1);
-        gameState.currentPlayerIndex = gameState.currentPlayerIndex % gameState.players.length;
+        gameState.currentPlayerIndex %= gameState.players.length;
         
         if (gameState.players.length === 1) {
             determineWinner();
             gameState.gameStage = 'showdown';
         }
-        io.emit('update', prepareGameStateForClient());
+        broadcastUpdate();
     });
 
     socket.on('advance', () => {
         if (gameState.hasBetThisRound.size === gameState.players.length) {
             advanceStage();
-            io.emit('update', prepareGameStateForClient());
+            broadcastUpdate();
         }
     });
 
-    socket.on('voiceSignal', (data) => {
-        if (data.to) {
-            io.to(data.to).emit('voiceSignal', { from: socket.id, signal: data.signal });
-        } else {
-            socket.broadcast.emit('voiceSignal', { from: socket.id, signal: data.signal });
-        }
+    socket.on('voiceSignal', ({ to, signal }) => {
+        const data = { from: socket.id, signal };
+        to ? io.to(to).emit('voiceSignal', data) : socket.broadcast.emit('voiceSignal', data);
     });
 
     socket.on('disconnect', (reason) => {
-        console.log(`Disconnected: ${socket.id} at ${new Date().toISOString()} - Reason: ${reason}`);
+        console.log(`Disconnected: ${socket.id} - ${reason}`);
         const playerIndex = gameState.players.findIndex(p => p.id === socket.id);
         if (playerIndex !== -1) {
             gameState.seats[gameState.players[playerIndex].seat] = null;
             gameState.players.splice(playerIndex, 1);
+            gameState.currentPlayerIndex %= gameState.players.length;
         } else {
             gameState.spectators--;
         }
-        io.emit('update', prepareGameStateForClient());
+        broadcastUpdate();
     });
 
-    socket.on('error', (error) => {
-        console.error(`Socket error for ${socket.id}: ${error.message} at ${new Date().toISOString()}`);
-    });
+    socket.on('error', (error) => console.error(`Socket error ${socket.id}:`, error));
 });
 
 shuffleDeck();
