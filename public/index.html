@@ -24,8 +24,16 @@
 </head>
 <body>
     <div id="errorMessage"></div>
-    <svg id="pokerSvg" viewBox="0 0 800 600"></svg>
-    <div id="controls">
+    <div id="configScreen" style="display: block; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.2);">
+        <h2>Configure Game</h2>
+        <label>Small Blind: <input type="number" id="smallBlind" min="1" value="5"></label><br>
+        <label>Big Blind: <input type="number" id="bigBlind" min="2" value="10"></label><br>
+        <label>Minimum Buy-In: <input type="number" id="minBuyIn" min="10" value="10"></label><br>
+        <label>Maximum Buy-In: <input type="number" id="maxBuyIn" min="10" value="1000"></label><br>
+        <button onclick="configureGame()">Start Game</button>
+    </div>
+    <svg id="pokerSvg" viewBox="0 0 800 600" style="display: none;"></svg>
+    <div id="controls" style="display: none;">
         <button id="sitDownBtn" onclick="sitDown()" style="display:none">Sit Down</button>
         <button id="betBtn" onclick="toggleBetOptions()" disabled>Bet</button>
         <button id="checkBtn" onclick="check()" disabled>Check</button>
@@ -79,7 +87,55 @@
                 dealerIndex: 0, hasBetThisRound: new Set(), pastHands: [], currentHandBets: { preflop: [], flop: [], turn: [], river: [] },
                 spectators: 0, smallBlind: 5, bigBlind: 10
             };
-            let myPlayerId = null;
+            let myPlayerId = localStorage.getItem('myPlayerId') || null;
+
+            socket.on('connect', () => {
+                console.log('Successfully connected to server with ID:', socket.id, 'at', new Date().toISOString());
+                if (!myPlayerId || myPlayerId !== socket.id) {
+                    myPlayerId = socket.id;
+                    localStorage.setItem('myPlayerId', myPlayerId);
+                    console.log('Saved new player ID:', myPlayerId);
+                }
+                errorMessage.textContent = 'Connected!';
+                setTimeout(() => errorMessage.textContent = '', 2000);
+                socket.emit('rejoin', { playerId: myPlayerId }); // Request to rejoin with existing ID
+                drawScene();
+            });
+
+            socket.on('rejoin', ({ playerId }) => {
+                console.log(`Rejoin attempt with playerId: ${playerId}`);
+                const player = gameState.players.find(p => p.id === playerId);
+                if (player) {
+                    console.log(`Rejoined player ${player.name} at seat ${player.seat}`);
+                    socket.emit('rejoin', prepareGameStateForClient());
+                } else {
+                    console.log('No matching player found for rejoin');
+                }
+            });
+
+            socket.on('update', (state) => {
+                try {
+                    console.log('Received update from server at', new Date().toISOString(), ':', state);
+                    gameState = state;
+                    gameState.hasBetThisRound = new Set(state.hasBetThisRound || []);
+                    myPlayerId = socket.id;
+                    localStorage.setItem('myPlayerId', myPlayerId); // Update ID if changed
+                    document.getElementById('spectatorNum').textContent = gameState.spectators || 0;
+                    if (!gameState.isConfigured) {
+                        document.getElementById('configScreen').style.display = 'block';
+                        document.getElementById('pokerSvg').style.display = 'none';
+                        document.getElementById('controls').style.display = 'none';
+                    } else {
+                        document.getElementById('configScreen').style.display = 'none';
+                        document.getElementById('pokerSvg').style.display = 'block';
+                        document.getElementById('controls').style.display = 'block';
+                        drawScene();
+                    }
+                } catch (e) {
+                    errorMessage.textContent = 'Update error: ' + e.message;
+                    console.error('Update error at', new Date().toISOString(), ':', e);
+                }
+            });
             let isSpectating = true;
             let localStream = null;
             let peerConnections = {};
@@ -145,6 +201,26 @@
                     };
                     if (localStream) peerConnections[from].addStream(localStream);
                 }
+
+            socket.on('sitDown', ({ name, chips, seat }) => {
+                console.log(`Sit down attempt: ${name} at seat ${seat}, current players: ${gameState.players.length}`);
+                if (gameState.seats[seat] === null && gameState.players.length < 8) {
+                    const player = { id: socket.id, name, chips, cards: [], seat };
+                    gameState.seats[seat] = player;
+                    gameState.players = gameState.seats.filter(p => p !== null); // Rebuild players array
+                    gameState.spectators--;
+                    console.log(`Player ${name} seated at ${seat}, total players: ${gameState.players.length}`);
+                    if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
+                        console.log('Starting new hand with 2+ players');
+                        startNewHand();
+                    } else {
+                        io.emit('update', prepareGameStateForClient());
+                    }
+                } else {
+                    console.log(`Seat ${seat} is taken or table is full`);
+                    socket.emit('sitDownError', 'Seat taken or table full');
+                }
+            });
 
                 if (signal.type === 'offer') {
                     await peerConnections[from].setRemoteDescription(new RTCSessionDescription(signal));
@@ -296,9 +372,38 @@
                         blindText.setAttribute('font-size', '12');
                         const smallBlindIndex = (gameState.dealerIndex + 1) % gameState.players.length;
                         const bigBlindIndex = (gameState.dealerIndex + 2) % gameState.players.length;
-                        if (gameState.players[smallBlindIndex]?.seat === i) blindText.textContent = 'SB';
-                        else if (gameState.players[bigBlindIndex]?.seat === i) blindText.textContent = 'BB';
-                        svg.appendChild(blindText);
+                        if (gameState.players[smallBlindIndex]?.seat === i) {
+                            const sbCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                            sbCircle.setAttribute('cx', x);
+                            sbCircle.setAttribute('cy', y + 100);
+                            sbCircle.setAttribute('r', '10');
+                            sbCircle.setAttribute('fill', '#000');
+                            svg.appendChild(sbCircle);
+                            const sbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                            sbText.setAttribute('x', x);
+                            sbText.setAttribute('y', y + 104);
+                            sbText.setAttribute('text-anchor', 'middle');
+                            sbText.setAttribute('fill', '#fff');
+                            sbText.setAttribute('font-size', '12');
+                            sbText.textContent = 'SB';
+                            svg.appendChild(sbText);
+                        } else if (gameState.players[bigBlindIndex]?.seat === i) {
+                            const bbCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                            bbCircle.setAttribute('cx', x);
+                            bbCircle.setAttribute('cy', y + 100);
+                            bbCircle.setAttribute('r', '10');
+                            bbCircle.setAttribute('fill', '#000');
+                            svg.appendChild(bbCircle);
+                            const bbText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                            bbText.setAttribute('x', x);
+                            bbText.setAttribute('y', y + 104);
+                            bbText.setAttribute('text-anchor', 'middle');
+                            bbText.setAttribute('fill', '#fff');
+                            bbText.setAttribute('font-size', '12');
+                            bbText.textContent = 'BB';
+                            svg.appendChild(bbText);
+                        }
+                        svg.appendChild(blindText); // Keep this line but it’s now optional
                     }
 
                     const potText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -424,23 +529,69 @@
                 });
             }
 
+            function configureGame() {
+                const smallBlind = parseInt(document.getElementById('smallBlind').value) || 5;
+                const bigBlind = parseInt(document.getElementById('bigBlind').value) || 10;
+                const minBuyIn = parseInt(document.getElementById('minBuyIn').value) || 10;
+                const maxBuyIn = parseInt(document.getElementById('maxBuyIn').value) || 1000;
+                socket.emit('configureGame', { smallBlind, bigBlind, minBuyIn, maxBuyIn });
+            }
+
+            socket.on('configError', (message) => {
+                errorMessage.textContent = message;
+                setTimeout(() => errorMessage.textContent = '', 2000);
+                console.error('Config error:', message);
+            });
+
+            socket.on('update', (state) => {
+                try {
+                    console.log('Received update from server at', new Date().toISOString(), ':', state);
+                    gameState = state;
+                    gameState.hasBetThisRound = new Set(state.hasBetThisRound || []);
+                    myPlayerId = socket.id;
+                    document.getElementById('spectatorNum').textContent = gameState.spectators || 0;
+                    if (!gameState.isConfigured) {
+                        document.getElementById('configScreen').style.display = 'block';
+                        document.getElementById('pokerSvg').style.display = 'none';
+                        document.getElementById('controls').style.display = 'none';
+                    } else {
+                        document.getElementById('configScreen').style.display = 'none';
+                        document.getElementById('pokerSvg').style.display = 'block';
+                        document.getElementById('controls').style.display = 'block';
+                        drawScene();
+                    }
+                } catch (e) {
+                    errorMessage.textContent = 'Update error: ' + e.message;
+                    console.error('Update error at', new Date().toISOString(), ':', e);
+                }
+            });
+
             async function toggleVoiceChat() {
                 if (!localStream) {
                     try {
                         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                         voiceToggle.style.background = '#4CAF50';
-                        Object.values(peerConnections).forEach(pc => pc.addStream(localStream));
+                        const audioTrack = localStream.getAudioTracks()[0];
+                        Object.values(peerConnections).forEach(pc => {
+                            pc.addTrack(audioTrack, localStream);
+                        });
                         const pc = new RTCPeerConnection(configuration);
                         pc.onicecandidate = ({ candidate }) => {
                             if (candidate) socket.emit('voiceSignal', { to: null, signal: candidate });
                         };
-                        pc.addStream(localStream);
+                        pc.ontrack = (event) => {
+                            const audio = new Audio();
+                            audio.srcObject = event.streams[0];
+                            audio.play().catch(e => console.error('Audio play failed:', e));
+                        };
+                        pc.addTrack(audioTrack, localStream);
                         const offer = await pc.createOffer();
                         await pc.setLocalDescription(offer);
                         socket.emit('voiceSignal', { to: null, signal: offer });
                         peerConnections[myPlayerId] = pc;
+                        console.log('Voice chat initialized with local stream:', localStream);
                     } catch (e) {
-                        errorMessage.textContent = 'Voice chat error: ' + e.message;
+                        errorMessage.textContent = 'Voice chat error: ' + (e.message || e);
                         console.error('Voice chat error at', new Date().toISOString(), ':', e);
                     }
                 } else {
@@ -449,6 +600,7 @@
                     voiceToggle.style.background = '#1a73e8';
                     Object.values(peerConnections).forEach(pc => pc.close());
                     peerConnections = {};
+                    console.log('Voice chat stopped');
                 }
             }
 

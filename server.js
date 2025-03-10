@@ -30,8 +30,11 @@ const gameState = {
     spectators: 0,
     smallBlind: 5,
     bigBlind: 10,
+    minBuyIn: 10,
+    maxBuyIn: 1000,
     deck: [],
-    seats: Array(8).fill(null)
+    seats: Array(8).fill(null),
+    isConfigured: false
 };
 
 function shuffleDeck() {
@@ -60,8 +63,8 @@ function dealCards() {
         const card2 = gameState.deck.pop();
         if (!card1 || !card2) {
             console.error('Failed to deal cards to player', player.id, '- Deck:', gameState.deck);
-            shuffleDeck(); // Reshuffle if we run out
-            player.cards = [gameState.deck.pop() || 'A♥', gameState.deck.pop() || 'K♦']; // Fallback
+            shuffleDeck();
+            player.cards = [gameState.deck.pop() || 'A♥', gameState.deck.pop() || 'K♦'];
         } else {
             player.cards = [card1, card2];
         }
@@ -151,18 +154,52 @@ io.on('connection', (socket) => {
     gameState.spectators++;
     io.emit('update', prepareGameStateForClient());
 
+    socket.on('configureGame', ({ smallBlind, bigBlind, minBuyIn, maxBuyIn }) => {
+        if (!gameState.isConfigured && gameState.players.length === 0) {
+            gameState.smallBlind = Math.max(1, smallBlind);
+            gameState.bigBlind = Math.max(gameState.smallBlind * 2, bigBlind);
+            gameState.minBuyIn = Math.max(gameState.bigBlind, minBuyIn);
+            gameState.maxBuyIn = Math.max(gameState.minBuyIn, maxBuyIn);
+            gameState.isConfigured = true;
+            console.log('Game configured:', { smallBlind: gameState.smallBlind, bigBlind: gameState.bigBlind, minBuyIn: gameState.minBuyIn, maxBuyIn: gameState.maxBuyIn });
+            io.emit('update', prepareGameStateForClient());
+        } else {
+            socket.emit('configError', 'Game already configured or players present');
+        }
+    });
+
+    socket.on('rejoin', ({ playerId }) => {
+        console.log(`Rejoin attempt with playerId: ${playerId}`);
+        const player = gameState.players.find(p => p.id === playerId);
+        if (player) {
+            console.log(`Rejoined player ${player.name} at seat ${player.seat}`);
+            socket.emit('rejoin', prepareGameStateForClient());
+        } else {
+            console.log('No matching player found for rejoin');
+        }
+    });
+
     socket.on('sitDown', ({ name, chips, seat }) => {
-        console.log(`Sit down attempt: ${name} at seat ${seat}`);
-        if (gameState.seats[seat] === null && gameState.players.length < 8) {
+        console.log(`Sit down attempt: ${name} at seat ${seat}, current players: ${gameState.players.length}`);
+        if (!gameState.isConfigured) {
+            socket.emit('sitDownError', 'Game not configured yet');
+            return;
+        }
+        if (gameState.seats[seat] === null && gameState.players.length < 8 && chips >= gameState.minBuyIn && chips <= gameState.maxBuyIn) {
             const player = { id: socket.id, name, chips, cards: [], seat };
             gameState.seats[seat] = player;
             gameState.players = gameState.seats.filter(p => p !== null);
             gameState.spectators--;
+            console.log(`Player ${name} seated at ${seat}, total players: ${gameState.players.length}`);
             if (gameState.players.length >= 2 && gameState.gameStage === 'waiting') {
+                console.log('Starting new hand with 2+ players');
                 startNewHand();
             } else {
                 io.emit('update', prepareGameStateForClient());
             }
+        } else {
+            console.log(`Seat ${seat} is taken, table full, or invalid buy-in (${chips})`);
+            socket.emit('sitDownError', 'Seat taken, table full, or invalid buy-in');
         }
     });
 
