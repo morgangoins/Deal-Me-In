@@ -53,13 +53,13 @@
 
     <script>
         try {
-            console.log('Attempting to connect to server...');
+            console.log('Attempting to connect to server at', new Date().toISOString());
             const socket = io('http://localhost:3000', {
                 transports: ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 10,
                 reconnectionDelay: 1000,
-                timeout: 10000
+                timeout: 20000 // Increased timeout
             });
             const svg = document.getElementById('pokerSvg');
             const sitDownBtn = document.getElementById('sitDownBtn');
@@ -84,7 +84,7 @@
             const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
             socket.on('connect', () => {
-                console.log('Successfully connected to server with ID:', socket.id);
+                console.log('Successfully connected to server with ID:', socket.id, 'at', new Date().toISOString());
                 errorMessage.textContent = 'Connected!';
                 setTimeout(() => errorMessage.textContent = '', 2000);
                 drawScene();
@@ -92,7 +92,7 @@
 
             socket.on('update', (state) => {
                 try {
-                    console.log('Received update from server:', state);
+                    console.log('Received update from server at', new Date().toISOString(), ':', state);
                     gameState = state;
                     gameState.hasBetThisRound = new Set(state.hasBetThisRound || []);
                     myPlayerId = socket.id;
@@ -100,22 +100,32 @@
                     drawScene();
                 } catch (e) {
                     errorMessage.textContent = 'Update error: ' + e.message;
-                    console.error('Update error:', e);
+                    console.error('Update error at', new Date().toISOString(), ':', e);
                 }
             });
 
             socket.on('connect_error', (error) => {
+                console.error('Socket.IO connect_error at', new Date().toISOString(), ':', error);
                 errorMessage.textContent = 'WebSocket connection error: ' + error.message;
-                console.error('Socket.IO connect_error:', error);
             });
 
             socket.on('reconnect_attempt', (attempt) => {
-                console.log(`Reconnection attempt ${attempt}`);
+                console.log(`Reconnection attempt ${attempt} at`, new Date().toISOString());
                 errorMessage.textContent = `Reconnecting... (Attempt ${attempt})`;
             });
 
+            socket.on('reconnect_failed', () => {
+                console.error('Reconnection failed at', new Date().toISOString());
+                errorMessage.textContent = 'Failed to reconnect to server';
+            });
+
+            socket.on('disconnect', (reason) => {
+                console.log('Disconnected from server at', new Date().toISOString(), '- Reason:', reason);
+                errorMessage.textContent = 'Disconnected: ' + reason;
+            });
+
             socket.on('error', (error) => {
-                console.error('Socket error:', error);
+                console.error('Socket error at', new Date().toISOString(), ':', error);
                 errorMessage.textContent = 'Socket error: ' + error.message;
             });
 
@@ -148,7 +158,7 @@
 
             function drawScene() {
                 try {
-                    console.log('Drawing scene');
+                    console.log('Drawing scene at', new Date().toISOString());
                     svg.innerHTML = '';
                     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
                     const dimFilter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
@@ -293,7 +303,7 @@
                     sitDownBtn.style.display = isSpectating && gameState.players.length < 8 ? 'block' : 'none';
                 } catch (e) {
                     errorMessage.textContent = 'Draw error: ' + e.message;
-                    console.error('Draw error:', e);
+                    console.error('Draw error at', new Date().toISOString(), ':', e);
                 }
             }
 
@@ -411,7 +421,7 @@
                         peerConnections[myPlayerId] = pc;
                     } catch (e) {
                         errorMessage.textContent = 'Voice chat error: ' + e.message;
-                        console.error('Voice chat error:', e);
+                        console.error('Voice chat error at', new Date().toISOString(), ':', e);
                     }
                 } else {
                     localStream.getTracks().forEach(track => track.stop());
@@ -432,7 +442,7 @@
             });
         } catch (e) {
             document.getElementById('errorMessage').textContent = 'Initialization error: ' + e.message;
-            console.error('Initialization error:', e);
+            console.error('Initialization error at', new Date().toISOString(), ':', e);
         }
     </script>
 </body>

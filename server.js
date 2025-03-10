@@ -10,9 +10,9 @@ const io = new Server(server, {
         methods: ["GET", "POST"],
         credentials: true
     },
-    transports: ['websocket'], // Force WebSocket
-    pingTimeout: 60000, // Increase timeout to 60s
-    pingInterval: 25000 // Ping every 25s
+    transports: ['websocket'],
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 app.use(express.static('public'));
@@ -122,7 +122,6 @@ function startNewHand() {
     io.emit('update', prepareGameStateForClient());
 }
 
-// Convert gameState for client (serialize Sets to arrays)
 function prepareGameStateForClient() {
     console.log('Sending game state to client:', { ...gameState, hasBetThisRound: Array.from(gameState.hasBetThisRound) });
     return {
@@ -132,7 +131,7 @@ function prepareGameStateForClient() {
 }
 
 io.on('connection', (socket) => {
-    console.log(`New connection from ${socket.id}`);
+    console.log(`New connection from ${socket.id} at ${new Date().toISOString()}`);
     gameState.spectators++;
     io.emit('update', prepareGameStateForClient());
 
@@ -205,8 +204,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('disconnect', () => {
-        console.log(`Disconnected: ${socket.id}`);
+    socket.on('disconnect', (reason) => {
+        console.log(`Disconnected: ${socket.id} at ${new Date().toISOString()} - Reason: ${reason}`);
         const playerIndex = gameState.players.findIndex(p => p.id === socket.id);
         if (playerIndex !== -1) {
             gameState.seats[gameState.players[playerIndex].seat] = null;
@@ -218,7 +217,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('error', (error) => {
-        console.error(`Socket error: ${error.message}`);
+        console.error(`Socket error for ${socket.id}: ${error.message} at ${new Date().toISOString()}`);
     });
 });
 
