@@ -54,12 +54,15 @@
     <script>
         try {
             console.log('Attempting to connect to server at', new Date().toISOString());
-            const socket = io('http://localhost:3000', {
+            // Dynamically set the Socket.IO URL based on the current page's origin
+            const socketUrl = window.location.origin.replace('http', 'ws').replace('https', 'wss');
+            console.log('Connecting to Socket.IO at:', socketUrl);
+            const socket = io(socketUrl, {
                 transports: ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 10,
                 reconnectionDelay: 1000,
-                timeout: 20000 // Increased timeout
+                timeout: 20000
             });
             const svg = document.getElementById('pokerSvg');
             const sitDownBtn = document.getElementById('sitDownBtn');
