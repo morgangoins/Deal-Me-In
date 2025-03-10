@@ -7,8 +7,10 @@ const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
         origin: "http://localhost:3000",
-        methods: ["GET", "POST"]
-    }
+        methods: ["GET", "POST"],
+        credentials: true
+    },
+    transports: ['websocket', 'polling'] // Explicitly allow both transports
 });
 
 app.use(express.static('public'));
@@ -43,6 +45,7 @@ function shuffleDeck() {
         const j = Math.floor(Math.random() * (i + 1));
         [gameState.deck[i], gameState.deck[j]] = [gameState.deck[j], gameState.deck[i]];
     }
+    console.log('Deck shuffled');
 }
 
 function dealCards() {
@@ -118,18 +121,13 @@ function startNewHand() {
 }
 
 io.on('connection', (socket) => {
+    console.log(`New connection: ${socket.id}`);
     gameState.spectators++;
     io.emit('update', gameState);
 
     socket.on('sitDown', ({ name, chips, seat }) => {
         if (gameState.seats[seat] === null && gameState.players.length < 8) {
-            const player = {
-                id: socket.id,
-                name,
-                chips,
-                cards: [],
-                seat
-            };
+            const player = { id: socket.id, name, chips, cards: [], seat };
             gameState.seats[seat] = player;
             gameState.players = gameState.seats.filter(p => p !== null);
             gameState.spectators--;
@@ -195,6 +193,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
+        console.log(`Disconnected: ${socket.id}`);
         const playerIndex = gameState.players.findIndex(p => p.id === socket.id);
         if (playerIndex !== -1) {
             gameState.seats[gameState.players[playerIndex].seat] = null;
@@ -206,8 +205,7 @@ io.on('connection', (socket) => {
     });
 });
 
-shuffleDeck(); // Now works because it's defined above
-
-server.listen(3000, () => {
+shuffleDeck();
+server.listen(3000, '0.0.0.0', () => { // Bind to all interfaces
     console.log('Server running on port 3000');
 });
