@@ -95,17 +95,6 @@
             padding: 5px;
             border-bottom: 1px solid #eee;
         }
-        .timer-bar {
-            width: 60px;
-            height: 5px;
-            background: #ccc;
-            position: absolute;
-        }
-        .timer-progress {
-            height: 100%;
-            background: #1a73e8;
-            transition: width linear;
-        }
     </style>
 </head>
 <body>
@@ -153,16 +142,12 @@
             currentHandBets: { preflop: [], flop: [], turn: [], river: [] }
         };
         let myPlayerId = null;
-        let timerInterval = null;
 
         socket.on('update', (state) => {
             gameState = state;
             gameState.hasBetThisRound = new Set(state.hasBetThisRound); // Convert array to Set
             myPlayerId = socket.id;
             drawScene();
-            if (gameState.players.length > 0 && gameState.gameStage !== 'waiting' && gameState.gameStage !== 'showdown') {
-                startTimer();
-            }
         });
 
         function drawScene() {
@@ -262,26 +247,6 @@
                 chipText.textContent = player.chips;
                 svg.appendChild(chipText);
 
-                if (i === gameState.currentPlayerIndex && gameState.gameStage !== 'waiting' && gameState.gameStage !== 'showdown') {
-                    const timerBar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                    timerBar.setAttribute('x', x - 30);
-                    timerBar.setAttribute('y', y + 160);
-                    timerBar.setAttribute('width', '60');
-                    timerBar.setAttribute('height', '5');
-                    timerBar.setAttribute('fill', '#ccc');
-                    timerBar.classList.add('timer-bar');
-                    svg.appendChild(timerBar);
-
-                    const progress = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                    progress.setAttribute('x', x - 30);
-                    progress.setAttribute('y', y + 160);
-                    progress.setAttribute('width', '60');
-                    progress.setAttribute('height', '5');
-                    progress.setAttribute('fill', '#1a73e8');
-                    progress.classList.add('timer-progress');
-                    svg.appendChild(progress);
-                }
-
                 if (player.cards) {
                     const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
                     const isWinner = gameState.gameStage === 'showdown' && i === gameState.currentPlayerIndex;
@@ -352,7 +317,6 @@
         function bet(amount) {
             socket.emit('bet', amount);
             betOptions.style.display = 'none';
-            clearTimer();
         }
 
         function betAllIn() {
@@ -367,17 +331,14 @@
 
         function check() {
             socket.emit('check');
-            clearTimer();
         }
 
         function fold() {
             socket.emit('fold');
-            clearTimer();
         }
 
         function advanceGame() {
             socket.emit('advance');
-            clearTimer();
         }
 
         function togglePastHands() {
@@ -402,35 +363,6 @@
                 pastHandsMenu.appendChild(entry);
             });
         }
-
-        function startTimer() {
-            if (gameState.gameStage === 'waiting' || gameState.gameStage === 'showdown' || gameState.players.length === 0) return;
-            if (gameState.players[gameState.currentPlayerIndex]?.id !== myPlayerId) return; // Only start timer for my turn
-            clearTimer();
-            let timeLeft = 15;
-            const progress = document.querySelector('.timer-progress');
-            if (progress) progress.style.width = '60px';
-
-            timerInterval = setInterval(() => {
-                timeLeft -= 0.1;
-                if (progress) progress.style.width = `${(timeLeft / 15) * 60}px`;
-                if (timeLeft <= 0) {
-                    clearTimer();
-                    if (gameState.currentHandBets[gameState.gameStage].length > 0 && !gameState.hasBetThisRound.has(myPlayerId)) {
-                        fold();
-                    } else {
-                        check();
-                    }
-                }
-            }, 100);
-        }
-
-        function clearTimer() {
-            if (timerInterval) {
-                clearInterval(timerInterval);
-                timerInterval = null;
-            }
-        }
     </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'91df9658be85bfb6',t:'MTc0MTU3NTg5My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
