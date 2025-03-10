@@ -6,7 +6,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "*", // Allow all origins for ngrok testing (update to specific origin in production)
+        origin: "*",
         methods: ["GET", "POST"],
         credentials: true
     },
@@ -47,32 +47,47 @@ function shuffleDeck() {
         const j = Math.floor(Math.random() * (i + 1));
         [gameState.deck[i], gameState.deck[j]] = [gameState.deck[j], gameState.deck[i]];
     }
-    console.log('Deck shuffled');
+    console.log('Deck shuffled with', gameState.deck.length, 'cards:', gameState.deck);
 }
 
 function dealCards() {
     if (gameState.deck.length < gameState.players.length * 2 + 5) {
+        console.log('Deck too small, reshuffling. Current deck:', gameState.deck);
         shuffleDeck();
     }
     gameState.players.forEach(player => {
-        player.cards = [gameState.deck.pop(), gameState.deck.pop()];
+        const card1 = gameState.deck.pop();
+        const card2 = gameState.deck.pop();
+        if (!card1 || !card2) {
+            console.error('Failed to deal cards to player', player.id, '- Deck:', gameState.deck);
+            shuffleDeck(); // Reshuffle if we run out
+            player.cards = [gameState.deck.pop() || 'A♥', gameState.deck.pop() || 'K♦']; // Fallback
+        } else {
+            player.cards = [card1, card2];
+        }
+        console.log(`Dealt cards to player ${player.id}:`, player.cards);
     });
     gameState.gameStage = 'preflop';
+    console.log('After dealing, deck has', gameState.deck.length, 'cards:', gameState.deck);
 }
 
 function advanceStage() {
     gameState.hasBetThisRound.clear();
     switch (gameState.gameStage) {
         case 'preflop':
-            gameState.communityCards = [gameState.deck.pop(), gameState.deck.pop(), gameState.deck.pop()];
+            gameState.communityCards = [
+                gameState.deck.pop() || 'A♠',
+                gameState.deck.pop() || 'K♠',
+                gameState.deck.pop() || 'Q♠'
+            ];
             gameState.gameStage = 'flop';
             break;
         case 'flop':
-            gameState.communityCards.push(gameState.deck.pop());
+            gameState.communityCards.push(gameState.deck.pop() || 'J♠');
             gameState.gameStage = 'turn';
             break;
         case 'turn':
-            gameState.communityCards.push(gameState.deck.pop());
+            gameState.communityCards.push(gameState.deck.pop() || '10♠');
             gameState.gameStage = 'river';
             break;
         case 'river':
@@ -83,6 +98,7 @@ function advanceStage() {
             startNewHand();
             break;
     }
+    console.log('Advanced to stage', gameState.gameStage, 'with community cards:', gameState.communityCards);
 }
 
 function determineWinner() {

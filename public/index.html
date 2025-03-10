@@ -54,7 +54,6 @@
     <script>
         try {
             console.log('Attempting to connect to server at', new Date().toISOString());
-            // Dynamically set the Socket.IO URL based on the current page's origin
             const socketUrl = window.location.origin.replace('http', 'ws').replace('https', 'wss');
             console.log('Connecting to Socket.IO at:', socketUrl);
             const socket = io(socketUrl, {
@@ -194,7 +193,11 @@
                     const totalWidth = gameState.communityCards.length * cardWidth + (gameState.communityCards.length - 1) * cardSpacing;
                     const startX = 400 - totalWidth / 2;
                     gameState.communityCards.forEach((card, i) => {
-                        drawCard(card, startX + i * (cardWidth + cardSpacing), 270, gameState.gameStage === 'showdown');
+                        if (card) {
+                            drawCard(card, startX + i * (cardWidth + cardSpacing), 270, gameState.gameStage === 'showdown');
+                        } else {
+                            console.warn('Skipping undefined community card at index', i);
+                        }
                     });
 
                     for (let i = 0; i < 8; i++) {
@@ -268,12 +271,22 @@
                         chipText.textContent = player.chips;
                         svg.appendChild(chipText);
 
-                        if (player.cards) {
+                        if (player.cards && Array.isArray(player.cards)) {
                             const showCards = player.id === myPlayerId || gameState.gameStage === 'showdown';
                             const isWinner = gameState.gameStage === 'showdown' && gameState.players[gameState.currentPlayerIndex]?.id === player.id;
                             const yOffset = i === 0 ? 270 : y - 25;
-                            drawCard(showCards ? player.cards[0] : '?', x - 45, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
-                            drawCard(showCards ? player.cards[1] : '?', x + 15, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
+                            const card1 = showCards ? player.cards[0] : '?';
+                            const card2 = showCards ? player.cards[1] : '?';
+                            if (card1) {
+                                drawCard(card1, x - 45, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
+                            } else {
+                                console.warn('Skipping undefined card[0] for player', player.id, 'cards:', player.cards);
+                            }
+                            if (card2) {
+                                drawCard(card2, x + 15, yOffset, !isWinner && gameState.gameStage === 'showdown', isWinner);
+                            } else {
+                                console.warn('Skipping undefined card[1] for player', player.id, 'cards:', player.cards);
+                            }
                         }
 
                         const blindText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -311,6 +324,10 @@
             }
 
             function drawCard(card, x, y, dim = false, highlight = false) {
+                if (!card || typeof card !== 'string') {
+                    console.warn('Invalid card value:', card);
+                    return;
+                }
                 const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
                 rect.setAttribute('x', x);
                 rect.setAttribute('y', y);
