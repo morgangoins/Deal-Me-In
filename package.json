@@ -1,0 +1,24 @@
+{
+  "name": "dealmein",
+  "version": "1.0.0",
+  "description": "I want to play poker with friends online.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/morgangoins/Deal-Me-In.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/morgangoins/Deal-Me-In/issues"
+  },
+  "homepage": "https://github.com/morgangoins/Deal-Me-In#readme",
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
